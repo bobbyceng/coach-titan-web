@@ -1,0 +1,11 @@
+{
+  "name": "Coach Titan",
+  "short_name": "Coach Titan",
+  "description": "健身饮食助手 - 用拳掌法估算摄入量，无需精确计算",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait",
+  "scope": "/"
+}
