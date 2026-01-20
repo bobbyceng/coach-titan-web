@@ -160,6 +160,10 @@ function saveLS(key, value) {
 }
 
 export default function App() {
+  const [activeTab, setActiveTab] = useState("input");
+  const [history, setHistory] = useState(() => loadLS("titan_history", []));
+  const [mealPhotoName, setMealPhotoName] = useState("");
+
   // 主食是否被用户手动调整过：避免训练日/餐次切换时强制覆盖
   const [carbTouched, setCarbTouched] = useState(false);
 
@@ -235,6 +239,7 @@ export default function App() {
   useEffect(() => saveLS("titan_profile", profile), [profile]);
   useEffect(() => saveLS("titan_tone", tone), [tone]);
   useEffect(() => saveLS("titan_is_training_today", isTrainingToday), [isTrainingToday]);
+  useEffect(() => saveLS("titan_history", history), [history]);
 
   // 自动主食：当目标/餐次/训练日变化时，若用户没手动动过主食滑条，则自动套用推荐主食
   useEffect(() => {
@@ -249,9 +254,12 @@ export default function App() {
 
   const est = useMemo(() => estimateMealByHand(meal), [meal]);
 
-function genPlan() {
-  console.log("genPlan clicked");
+  function handlePhotoChange(event) {
+    const file = event.target.files?.[0];
+    setMealPhotoName(file ? file.name : "");
+  }
 
+function genPlan() {
   const goal = (profile.goal || "").trim();
   const kcal = est.kcal;
 
@@ -283,12 +291,20 @@ function genPlan() {
     : "伤病提示：未填写。若有旧伤/疼痛史，建议补充。";
 
   // 4) 单一出口 setResult（不会出现 summary 未定义）
-  setResult({
+  const newResult = {
+    timestamp: new Date().toLocaleString(),
     summary: toneWrap(tone, summary),
     plan: toneWrap(tone, strategy),
     safety,
     disclaimer: DISCLAIMER,
-  });
+    mealTime: meal.mealTime,
+    mealDesc: meal.desc?.trim() || "未命名餐食",
+    photoName: mealPhotoName,
+  };
+
+  setResult(newResult);
+  setHistory((prev) => [newResult, ...prev]);
+  setActiveTab("advice");
 }
 
   function resetAll() {
@@ -307,210 +323,277 @@ function genPlan() {
       vegFists: 1,
       mealTime: "午餐",
     });
+    setMealPhotoName("");
     setResult(null);
+    setActiveTab("input");
   }
 
   return (
-    <div className="app">
-      <header className="topbar">
-        <div>
-          <h1>{APP_TITLE}</h1>
-          <p className="subtitle">最小可用 Demo：档案（A）+ 拳掌法饮食估算（B）｜纯中文｜Mock AI</p>
-        </div>
-        <div className="tone">
-          <label>语气</label>
-          <select value={tone} onChange={(e) => setTone(e.target.value)}>
-            {TONES.map((t) => (
-              <option key={t.key} value={t.key}>
-                {t.label}
-              </option>
-            ))}
-          </select>
-        </div>
+    <>
+      <div className="disclaimer-banner">{DISCLAIMER}</div>
+      <div className="app">
+        <header className="topbar">
+          <div className="app-title">{APP_TITLE}</div>
+          <div className="app-subtitle">饮食估算 · 训练日动态调整</div>
+        </header>
 
-        <div className="tone">
-          <label>今日训练</label>
-          <select
-            value={isTrainingToday ? "yes" : "no"}
-            onChange={(e) => {
-              setCarbTouched(false);
-              setIsTrainingToday(e.target.value === "yes");
-            }}
-          >
-            <option value="yes">是</option>
-            <option value="no">否</option>
-          </select>
-        </div>
-      </header>
-
-      <main className="grid">
-        {/* Module A */}
-        <section className="card">
-          <h2>📝 模块 A：用户档案（简化）</h2>
-          <div className="formRow">
-            <label>目标</label>
-            <select
-              value={profile.goal}
-              onChange={(e) => setProfile({ ...profile, goal: e.target.value })}
-            >
-              <option>减脂</option>
-              <option>增肌</option>
-              <option>维持</option>
-            </select>
-          </div>
-          <div className="formRow">
-            <label>训练频率</label>
-            <select
-              value={profile.trainingFreq}
-              onChange={(e) => setProfile({ ...profile, trainingFreq: e.target.value })}
-            >
-              <option value="每周 0-1 次">很少练（0-1）</option>
-              <option value="每周 1-2 次">偶尔练（1-2）</option>
-              <option value="每周 3-4 次">常规（3-4）</option>
-              <option value="每周 5-6 次">高频（5-6）</option>
-              <option value="每周 7 次">每天（7）</option>
-            </select>
-          </div>
-          <div className="small">会轻微影响主食推荐：0-2 次/周 -0.5；3-4 次/周（含）与更高 +0.5（减脂不加碳）。</div>
-          <div className="formRow">
-            <label>伤病/疼痛</label>
-            <input
-              value={profile.injuries}
-              onChange={(e) => setProfile({ ...profile, injuries: e.target.value })}
-              placeholder="例如：膝盖偶尔痛 / 腰椎间盘突出史 / 无"
-            />
-          </div>
-          <div className="formRow">
-            <label>备注</label>
-            <textarea
-              rows={3}
-              value={profile.notes}
-              onChange={(e) => setProfile({ ...profile, notes: e.target.value })}
-              placeholder="例如：对乳糖敏感、晚餐常应酬、喜欢清淡…"
-            />
-          </div>
-          <div className="hint">已自动保存到本地（localStorage），刷新页面不会丢。</div>
-        </section>
-
-        {/* Module B */}
-        <section className="card">
-          <h2>🍽️ 模块 B：拳掌法估算（Demo）</h2>
-          <div className="formRow">
-            <label>餐次</label>
-            <select
-              value={meal.mealTime}
-              onChange={(e) => {
-                const next = e.target.value;
-                // 切换餐次：直接套用该餐次的默认拳掌法（并按训练日/休息日自动给主食推荐）
-                setCarbTouched(false);
-                setMealSafe({ mealTime: next });
-                applyDefaultHandMap(next);
-              }}
-            >
-              <option>早餐</option>
-              <option>午餐</option>
-              <option>晚餐</option>
-              <option>加餐</option>
-            </select>
-          </div>
-
-          <div className="formRow">
-            <label>这餐吃了什么（可选）</label>
-            <input
-              value={meal.desc}
-              onChange={(e) => setMealSafe({ desc: e.target.value })}
-              placeholder="例如：牛肉饭+青菜；火锅；鸡胸+土豆…"
-            />
-          </div>
-
-          <div className="sliders">
-            <Slider
-              label="蛋白（掌）"
-              value={meal.proteinPalms}
-              onChange={(v) => setMealSafe({ proteinPalms: v })}
-              min={0}
-              max={8}
-              step={0.5}
-            />
-            <Slider
-              label="主食（捧）"
-              value={meal.carbCuppedHands}
-              onChange={(v) => {
-                setCarbTouched(true);
-                setMealSafe({ carbCuppedHands: v });
-              }}
-              min={0}
-              max={8}
-              step={0.5}
-            />
-            <Slider
-              label="油脂（拇指）"
-              value={meal.fatThumbs}
-              onChange={(v) => setMealSafe({ fatThumbs: v })}
-              min={0}
-              max={8}
-              step={0.5}
-            />
-            <Slider
-              label="蔬菜（拳）"
-              value={meal.vegFists}
-              onChange={(v) => setMealSafe({ vegFists: v })}
-              min={0}
-              max={8}
-              step={0.5}
-            />
-          </div>
-
-          <div className="estBox">
-            <div className="estLine">
-              <b>实时估算</b>
-              <span>
-                ≈ <b>{est.kcal}</b> kcal ｜ P <b>{est.protein_g}</b>g / C <b>{est.carbs_g}</b>g / F{" "}
-                <b>{est.fat_g}</b>g
-              </span>
-            </div>
-            <div className="small">
-              说明：为 Demo 使用的粗略估算，不追求准确克重；用于快速“结构化决策”。
-            </div>
-          </div>
-
-          <div className="actions">
-            <button className="primary" onClick={genPlan}>
-              生成下一步饮食策略
-            </button>
-            <button onClick={() => applyDefaultHandMap(meal.mealTime)}>套用默认拳掌法</button>
-            <button onClick={resetAll}>重置 Demo</button>
-          </div>
-        </section>
-
-        {/* Output */}
-        <section className="card full">
-          <h2>📌 输出</h2>
-          {!result ? (
-            <div className="muted">点击「生成下一步饮食策略」后，这里会显示结果。</div>
-          ) : (
-            <div className="output">
-              <div className="bubble">
-                <b>结果摘要</b>
-                <p>{result.summary}</p>
+        <main className="content">
+          {activeTab === "profile" && (
+            <section className="card">
+              <h2>用户档案</h2>
+              <div className="formRow">
+                <label>目标</label>
+                <select
+                  value={profile.goal}
+                  onChange={(e) => setProfile({ ...profile, goal: e.target.value })}
+                >
+                  <option>减脂</option>
+                  <option>增肌</option>
+                  <option>维持</option>
+                </select>
               </div>
-              <div className="bubble">
-                <b>下一步建议</b>
-                <p>{result.plan}</p>
-                {meal.desc?.trim() ? (
-                  <p className="small">你输入的描述：{meal.mealTime}「{meal.desc}」</p>
-                ) : null}
+              <div className="formRow">
+                <label>训练频率</label>
+                <select
+                  value={profile.trainingFreq}
+                  onChange={(e) => setProfile({ ...profile, trainingFreq: e.target.value })}
+                >
+                  <option value="每周 0-1 次">很少练（0-1）</option>
+                  <option value="每周 1-2 次">偶尔练（1-2）</option>
+                  <option value="每周 3-4 次">常规（3-4）</option>
+                  <option value="每周 5-6 次">高频（5-6）</option>
+                  <option value="每周 7 次">每天（7）</option>
+                </select>
               </div>
-              <div className="bubble warn">
-                <b>安全提示</b>
-                <p>{result.safety}</p>
+              <div className="formRow">
+                <label>伤病史</label>
+                <input
+                  value={profile.injuries}
+                  onChange={(e) => setProfile({ ...profile, injuries: e.target.value })}
+                  placeholder="例如：膝盖偶尔痛 / 腰椎间盘突出史 / 无"
+                />
               </div>
-              <div className="disclaimer">{result.disclaimer}</div>
-            </div>
+              <div className="formRow">
+                <label>备注</label>
+                <textarea
+                  rows={3}
+                  value={profile.notes}
+                  onChange={(e) => setProfile({ ...profile, notes: e.target.value })}
+                  placeholder="例如：对乳糖敏感、晚餐常应酬、喜欢清淡"
+                />
+              </div>
+              <div className="formRow">
+                <label>语气风格</label>
+                <select value={tone} onChange={(e) => setTone(e.target.value)}>
+                  {TONES.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </section>
           )}
-        </section>
-      </main>
-    </div>
+
+          {activeTab === "input" && (
+            <section className="card">
+              <h2>饮食输入</h2>
+              <div className="photo-upload">
+                <label className="photo-label">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoChange}
+                  />
+                  <div className="photo-title">拍照或上传（可选）</div>
+                  <div className="photo-subtitle">
+                    {mealPhotoName ? `已选择：${mealPhotoName}` : "点击选择一张照片"}
+                  </div>
+                </label>
+              </div>
+
+              <div className="formRow twoCol">
+                <div>
+                  <label>餐次</label>
+                  <select
+                    value={meal.mealTime}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setCarbTouched(false);
+                      setMealSafe({ mealTime: next });
+                      applyDefaultHandMap(next);
+                    }}
+                  >
+                    <option>早餐</option>
+                    <option>午餐</option>
+                    <option>晚餐</option>
+                    <option>加餐</option>
+                  </select>
+                </div>
+                <div>
+                  <label>今日训练</label>
+                  <select
+                    value={isTrainingToday ? "yes" : "no"}
+                    onChange={(e) => {
+                      setCarbTouched(false);
+                      setIsTrainingToday(e.target.value === "yes");
+                    }}
+                  >
+                    <option value="yes">是</option>
+                    <option value="no">否</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="formRow">
+                <label>餐食描述</label>
+                <input
+                  value={meal.desc}
+                  onChange={(e) => setMealSafe({ desc: e.target.value })}
+                  placeholder="例如：牛肉饭 + 青菜"
+                />
+              </div>
+
+              <div className="sliders">
+                <Slider
+                  label="蛋白（掌）"
+                  value={meal.proteinPalms}
+                  onChange={(v) => setMealSafe({ proteinPalms: v })}
+                  min={0}
+                  max={8}
+                  step={0.5}
+                />
+                <Slider
+                  label="主食（捧）"
+                  value={meal.carbCuppedHands}
+                  onChange={(v) => {
+                    setCarbTouched(true);
+                    setMealSafe({ carbCuppedHands: v });
+                  }}
+                  min={0}
+                  max={8}
+                  step={0.5}
+                />
+                <Slider
+                  label="油脂（拇指）"
+                  value={meal.fatThumbs}
+                  onChange={(v) => setMealSafe({ fatThumbs: v })}
+                  min={0}
+                  max={8}
+                  step={0.5}
+                />
+                <Slider
+                  label="蔬菜（拳）"
+                  value={meal.vegFists}
+                  onChange={(v) => setMealSafe({ vegFists: v })}
+                  min={0}
+                  max={8}
+                  step={0.5}
+                />
+              </div>
+
+              <div className="estBox">
+                <div className="estLine">
+                  <span>实时估算</span>
+                  <span>
+                    {est.kcal} kcal ｜ P {est.protein_g}g / C {est.carbs_g}g / F {est.fat_g}g
+                  </span>
+                </div>
+              </div>
+
+              <div className="actions">
+                <button className="primary" onClick={genPlan}>生成策略</button>
+                <button onClick={() => applyDefaultHandMap(meal.mealTime)}>套用默认拳掌法</button>
+                <button onClick={resetAll}>重置</button>
+              </div>
+            </section>
+          )}
+
+          {activeTab === "advice" && (
+            <section className="card">
+              <h2>规划建议</h2>
+              {!result ? (
+                <div className="muted">先在“饮食输入”里生成策略。</div>
+              ) : (
+                <div className="output">
+                  <div className="bubble">
+                    <b>结果摘要</b>
+                    <p>{result.summary}</p>
+                  </div>
+                  <div className="bubble">
+                    <b>下一步建议</b>
+                    <p>{result.plan}</p>
+                    {meal.desc?.trim() ? (
+                      <p className="small">餐食描述：{meal.mealTime}「{meal.desc}」</p>
+                    ) : null}
+                  </div>
+                  <div className="bubble">
+                    <b>AI 解释（预留）</b>
+                    <p>后续可接入模型，生成更细化的个性化说明。</p>
+                  </div>
+                  <div className="bubble warn">
+                    <b>安全提示</b>
+                    <p>{result.safety}</p>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {activeTab === "history" && (
+            <section className="card">
+              <h2>每餐记录</h2>
+              {history.length === 0 ? (
+                <div className="muted">暂无记录。</div>
+              ) : (
+                <div className="historyList">
+                  {history.map((item, index) => (
+                    <div className="historyItem" key={`${item.timestamp}-${index}`}>
+                      <div className="historyHeader">
+                        <span>{item.mealTime}</span>
+                        <span>{item.timestamp}</span>
+                      </div>
+                      <div className="historyTitle">{item.mealDesc}</div>
+                      <div className="historyMeta">{item.summary}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {history.length > 0 ? (
+                <button
+                  className="secondary"
+                  onClick={() => {
+                    setHistory([]);
+                    localStorage.removeItem("titan_history");
+                  }}
+                >
+                  清空记录
+                </button>
+              ) : null}
+            </section>
+          )}
+        </main>
+
+        <nav className="nav-bar">
+          <NavButton label="档案" id="profile" activeTab={activeTab} onSelect={setActiveTab} />
+          <NavButton label="输入" id="input" activeTab={activeTab} onSelect={setActiveTab} />
+          <NavButton label="建议" id="advice" activeTab={activeTab} onSelect={setActiveTab} />
+          <NavButton label="记录" id="history" activeTab={activeTab} onSelect={setActiveTab} />
+        </nav>
+      </div>
+    </>
+  );
+}
+
+function NavButton({ label, id, activeTab, onSelect }) {
+  const isActive = activeTab === id;
+  return (
+    <button
+      className={`nav-button${isActive ? " active" : ""}`}
+      onClick={() => onSelect(id)}
+    >
+      {label}
+    </button>
   );
 }
 
