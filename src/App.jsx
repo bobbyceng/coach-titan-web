@@ -1,7 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Beef,
+  Camera,
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  CreditCard,
+  Droplet,
+  History,
+  Leaf,
+  PenLine,
+  Send,
+  Sparkles,
+  Upload,
+  User,
+  Wheat,
+  X,
+} from "lucide-react";
 import "./App.css";
 
-const APP_TITLE = "Coach Titan · 饮食 Demo";
+const APP_TITLE = "Coach Titan";
 const DISCLAIMER =
   "免责声明：本工具仅供参考与面试演示用途，不构成医疗/营养/训练处方。存在疾病、受伤、孕期或进食障碍风险请咨询医生或注册营养师。";
 
@@ -11,7 +30,6 @@ const TONES = [
   { key: "strict", label: "严苛" },
 ];
 
-// 新增：目标 × 餐次 → 默认拳掌法份量（允许 0.5）
 const DEFAULT_HAND_MAP = {
   "减脂": {
     早餐: { proteinPalms: 1, carbCuppedHands: 1, fatThumbs: 0.5, vegFists: 1 },
@@ -33,17 +51,13 @@ const DEFAULT_HAND_MAP = {
   },
 };
 
-// 新增：训练日/休息日 → 每餐主食推荐（更舒适，且可按 0.5 调节）
-// 说明：这里只做“主食（捧）”的自动建议；蛋白/油脂/蔬菜仍用 DEFAULT_HAND_MAP 的 preset。
 const CARB_RECO_MAP = {
   "减脂": {
     train: { 早餐: 0.5, 午餐: 0.5, 晚餐: 0.5, 加餐: 0 },
     rest: { 早餐: 0.5, 午餐: 0.5, 晚餐: 0.5, 加餐: 0 },
   },
   "增肌": {
-    // 训练日：三餐正常，晚餐稍低一点；加餐少量碳水更舒服
     train: { 早餐: 1.5, 午餐: 1.5, 晚餐: 1, 加餐: 0.5 },
-    // 休息日：不强制加餐（加餐主食=0），三餐“正常量”
     rest: { 早餐: 1, 午餐: 1, 晚餐: 1, 加餐: 0 },
   },
   "维持": {
@@ -53,35 +67,23 @@ const CARB_RECO_MAP = {
 };
 
 function parseTrainingDaysPerWeek(trainingFreq) {
-  // Accepts strings like "每周 3-4 次", "每周4次", "3次", "5", etc.
   const s = String(trainingFreq || "");
   const nums = s.match(/\d+(?:\.\d+)?/g);
   if (!nums || nums.length === 0) return null;
   const values = nums.map((n) => Number(n)).filter((n) => Number.isFinite(n));
   if (values.length === 0) return null;
-  // If a range is provided (e.g., 3-4), use the average
   if (values.length >= 2) return (values[0] + values[1]) / 2;
   return values[0];
 }
 
 function trainingFreqCarbDelta(goal, trainingFreq) {
-  // Simple heuristic: higher training frequency => slightly more carbs; lower => slightly fewer.
-  // Applies mainly to 增肌/维持. 减脂保持更保守。
   const g = (goal || "维持").trim();
   const days = parseTrainingDaysPerWeek(trainingFreq);
   if (days === null) return 0;
-
-  // Buckets
-  // <=2 days/wk: -0.5
-  // 2.5-3 days/wk: 0
-  // >=3.5 days/wk: +0.5  (方案2：把“常规(3-4)”也纳入轻微加碳)
   let delta = 0;
   if (days <= 2) delta = -0.5;
   else if (days >= 3.5) delta = 0.5;
-
-  // For 减脂: keep conservative (no positive bump)
   if (g.includes("减脂") && delta > 0) delta = 0;
-
   return delta;
 }
 
@@ -92,46 +94,28 @@ function getRecommendedCarb(goal, mealTime, isTrainingToday, trainingFreq) {
   const mode = isTrainingToday ? "train" : "rest";
   const base = goalMap?.[mode]?.[mt];
   const baseNum = typeof base === "number" ? base : 0;
-
   const delta = trainingFreqCarbDelta(g, trainingFreq);
   return baseNum + delta;
 }
 
-// 新增：将数值限定到 [min, max]
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-// 新增：格式化份量（保留 .5，隐藏不必要的 .0）
-function fmtPortion(x) {
-  if (x === null || x === undefined) return "";
-  if (Number.isInteger(x)) return String(x);
-  return String(x).replace(/\.0+$/, "");
-}
-
-// —— 简化版拳掌法估算（非常粗略：用于 Demo）
-// 目标：给“相对可解释”的估算，而不是精确克重
 function estimateMealByHand({
   proteinPalms = 1,
   carbCuppedHands = 1,
   fatThumbs = 1,
   vegFists = 1,
 }) {
-  // 这里用“典型近似值”做估算（演示用）
-  // proteinPalm: ~25g蛋白、~150kcal（瘦肉/鱼/蛋等平均）
-  // carbCuppedHand: ~25g碳水、~110kcal（米饭/面/薯类平均）
-  // fatThumb: ~5g脂肪、~45kcal（油/坚果/酱料平均）
-  // vegFist: ~25kcal（蔬菜热量很低）
   const protein_g = proteinPalms * 25;
-  const carbs_g = carbCuppedHands * 25;
+  const carbs_g = carbCuppedHands * 20;
   const fat_g = fatThumbs * 5;
-
   const kcal =
     proteinPalms * 150 +
-    carbCuppedHands * 110 +
+    carbCuppedHands * 80 +
     fatThumbs * 45 +
     vegFists * 25;
-
   return { protein_g, carbs_g, fat_g, kcal };
 }
 
@@ -142,7 +126,7 @@ function toneWrap(toneKey, text) {
   if (toneKey === "casual") {
     return `OK～${text}（咱们走“够用就好”的路子）`;
   }
-  return text; // 专业理性
+  return text;
 }
 
 function loadLS(key, fallback) {
@@ -160,14 +144,24 @@ function saveLS(key, value) {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState("input");
+  const [activeTab, setActiveTab] = useState("home");
   const [history, setHistory] = useState(() => loadLS("titan_history", []));
-  const [mealPhotoName, setMealPhotoName] = useState("");
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [planMode, setPlanMode] = useState("whtr");
+  const [showPlanChooser, setShowPlanChooser] = useState(false);
+  const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [coachAdvice, setCoachAdvice] = useState("");
+  const [result, setResult] = useState(null);
 
-  // 主食是否被用户手动调整过：避免训练日/餐次切换时强制覆盖
+  const [photoFront, setPhotoFront] = useState({ name: "", url: "", base64: "" });
+  const [photoSide, setPhotoSide] = useState({ name: "", url: "", base64: "" });
+  const frontInputRef = useRef(null);
+  const sideInputRef = useRef(null);
+  const avatarInputRef = useRef(null);
+
   const [carbTouched, setCarbTouched] = useState(false);
-
-  // Meal input (Module B)
   const [meal, _setMeal] = useState({
     desc: "",
     proteinPalms: 1,
@@ -177,9 +171,16 @@ export default function App() {
     mealTime: "午餐",
   });
 
-  // Profile (Module A)
   const [profile, setProfile] = useState(() =>
     loadLS("titan_profile", {
+      name: "",
+      avatar: "",
+      age: "",
+      height: "",
+      weight: "",
+      chest: "",
+      waist: "",
+      hip: "",
       goal: "减脂",
       trainingFreq: "每周 3-4 次",
       injuries: "无",
@@ -187,15 +188,54 @@ export default function App() {
     })
   );
 
-  // Tone
   const [tone, setTone] = useState(() => loadLS("titan_tone", "pro"));
-
-  // 今日是否训练（用于主食动态偏移）
   const [isTrainingToday, setIsTrainingToday] = useState(() =>
     loadLS("titan_is_training_today", true)
   );
 
-  // Wrapper to ensure numeric fields snap to 0.5 and stay within sensible bounds
+  const isSafetyGatePassed = useMemo(() => {
+    const injuries = (profile.injuries || "").trim();
+    const normalized = injuries.replace(/\s+/g, "");
+    return normalized.length > 0;
+  }, [profile.injuries]);
+
+  const displayName = useMemo(() => {
+    const name = (profile.name || "").trim();
+    return name || "你";
+  }, [profile.name]);
+
+  useEffect(() => saveLS("titan_profile", profile), [profile]);
+  useEffect(() => saveLS("titan_tone", tone), [tone]);
+  useEffect(() => saveLS("titan_is_training_today", isTrainingToday), [isTrainingToday]);
+  useEffect(() => saveLS("titan_history", history), [history]);
+  useEffect(() => {
+    if (!showToast) return undefined;
+    const timer = setTimeout(() => setShowToast(false), 2500);
+    return () => clearTimeout(timer);
+  }, [showToast]);
+
+  useEffect(() => {
+    if (carbTouched) return;
+    const recommendedCarb = clamp(
+      getRecommendedCarb(profile.goal, meal.mealTime, isTrainingToday, profile.trainingFreq),
+      0,
+      8
+    );
+    setMealSafe((prev) => ({ ...prev, carbCuppedHands: recommendedCarb }));
+  }, [profile.goal, meal.mealTime, isTrainingToday, carbTouched, profile.trainingFreq]);
+
+  useEffect(() => {
+    if (!photoFront.url) return undefined;
+    return () => URL.revokeObjectURL(photoFront.url);
+  }, [photoFront.url]);
+
+  useEffect(() => {
+    if (!photoSide.url) return undefined;
+    return () => URL.revokeObjectURL(photoSide.url);
+  }, [photoSide.url]);
+
+  const est = useMemo(() => estimateMealByHand(meal), [meal]);
+
   function setMealSafe(patch) {
     _setMeal((prev) => {
       const next = typeof patch === "function" ? patch(prev) : { ...prev, ...patch };
@@ -210,108 +250,294 @@ export default function App() {
     });
   }
 
-  // 套用默认拳掌法：按「目标 × 餐次」给 Module B 的滑条一个默认起点
-  // 主食会根据“今日是否训练”自动取推荐值（更舒适，且休息日加餐主食为 0）
-  function applyDefaultHandMap(nextMealTime) {
+  function applyDefaultHandMap(nextMealTime, mode = planMode) {
     const goal = (profile.goal || "维持").trim();
     const mealTime = (nextMealTime || meal.mealTime || "午餐").trim();
-
     const goalMap = DEFAULT_HAND_MAP[goal] || DEFAULT_HAND_MAP["维持"];
     const preset = goalMap?.[mealTime];
     if (!preset) return;
 
-    const recommendedCarb = clamp(getRecommendedCarb(goal, mealTime, isTrainingToday, profile.trainingFreq), 0, 8);
+    let recommendedCarb = getRecommendedCarb(goal, mealTime, isTrainingToday, profile.trainingFreq);
+    let proteinPalms = preset.proteinPalms;
+    let vegFists = preset.vegFists;
 
-    // 只覆盖四个数值，不动 desc/mealTime
+    if (mode === "whtr") {
+      const height = Number(profile.height);
+      const waist = Number(profile.waist);
+      const hasWhtr = Number.isFinite(height) && Number.isFinite(waist) && height > 0 && waist > 0;
+      if (hasWhtr) {
+        const whtr = waist / height;
+        if (whtr >= 0.53) {
+          recommendedCarb -= 0.5;
+          vegFists += 0.5;
+        } else if (whtr <= 0.45) {
+          recommendedCarb += 0.5;
+          proteinPalms += 0.5;
+        }
+      }
+    } else if (mode === "basic") {
+      const height = Number(profile.height);
+      const weight = Number(profile.weight);
+      const age = Number(profile.age);
+      const hasBmi = Number.isFinite(height) && Number.isFinite(weight) && height > 0 && weight > 0;
+      if (goal.includes("减脂")) {
+        recommendedCarb -= 0.5;
+        vegFists += 0.5;
+      } else if (goal.includes("增肌")) {
+        proteinPalms += 0.5;
+        recommendedCarb += 0.5;
+      }
+      if (hasBmi) {
+        const bmi = weight / ((height / 100) ** 2);
+        if (bmi >= 26) {
+          recommendedCarb -= 0.5;
+          vegFists += 0.5;
+        } else if (bmi <= 19) {
+          recommendedCarb += 0.5;
+          proteinPalms += 0.5;
+        }
+      }
+      if (Number.isFinite(age) && age >= 45) {
+        recommendedCarb -= 0.5;
+        vegFists += 0.5;
+      }
+    }
+
+    recommendedCarb = clamp(recommendedCarb, 0, 8);
+
     setMealSafe((prev) => ({
       ...prev,
       ...preset,
+      proteinPalms,
+      vegFists,
       carbCuppedHands: recommendedCarb,
     }));
-
-    // 视为“自动值”，后续餐次/训练日切换可继续自动更新
     setCarbTouched(false);
   }
 
-  // Output
-  const [result, setResult] = useState(null);
+  function readImageBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result?.toString().split(",")[1] || "");
+      reader.onerror = () => reject(new Error("图片读取失败"));
+      reader.readAsDataURL(file);
+    });
+  }
 
-  useEffect(() => saveLS("titan_profile", profile), [profile]);
-  useEffect(() => saveLS("titan_tone", tone), [tone]);
-  useEffect(() => saveLS("titan_is_training_today", isTrainingToday), [isTrainingToday]);
-  useEffect(() => saveLS("titan_history", history), [history]);
+  async function analyzeWithVision({ prompt, imageBase64 }) {
+    const response = await fetch("https://coach-titan-web2.vercel.app/api/vision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, imageBase64 }),
+    });
 
-  // 自动主食：当目标/餐次/训练日变化时，若用户没手动动过主食滑条，则自动套用推荐主食
-  useEffect(() => {
-    if (carbTouched) return;
-    const recommendedCarb = clamp(
-      getRecommendedCarb(profile.goal, meal.mealTime, isTrainingToday, profile.trainingFreq),
-      0,
-      8
-    );
-    setMealSafe((prev) => ({ ...prev, carbCuppedHands: recommendedCarb }));
-  }, [profile.goal, meal.mealTime, isTrainingToday, carbTouched, profile.trainingFreq]);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data?.error || "Vision request failed");
+    }
 
-  const est = useMemo(() => estimateMealByHand(meal), [meal]);
+    return data?.data;
+  }
 
-  function handlePhotoChange(event) {
+  function extractResponseText(payload) {
+    const output = payload?.output?.[0]?.content;
+    if (Array.isArray(output)) {
+      const textPart = output.find((part) => part?.type === "output_text" || part?.text);
+      return textPart?.text || "";
+    }
+    return payload?.choices?.[0]?.message?.content || "";
+  }
+
+  function parseVisionResult(text) {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+
+  async function analyzeWithTwoPhotos({ frontBase64, sideBase64 }) {
+    const topPrompt =
+      "这是俯拍图，旁边有银行卡/信用卡/交通卡作参照。请识别食物并按拳掌法估算，返回JSON：{\"desc\":\"餐食名称\",\"proteinPalms\":1,\"carbCuppedHands\":1,\"fatThumbs\":1,\"vegFists\":1}。只返回JSON。";
+    const topData = await analyzeWithVision({ prompt: topPrompt, imageBase64: frontBase64 });
+    const topText = extractResponseText(topData);
+    const topResult = parseVisionResult(topText);
+
+    if (!sideBase64) return topResult;
+
+    const basePayload = topResult ? JSON.stringify(topResult) : "{}";
+    const sidePrompt =
+      `这是侧面图，旁边有银行卡/信用卡/交通卡作参照。上一张俯拍估算为：${basePayload}。请结合侧面图修正份量，返回JSON：{"desc":"餐食名称","proteinPalms":1,"carbCuppedHands":1,"fatThumbs":1,"vegFists":1}。只返回JSON。`;
+    const sideData = await analyzeWithVision({ prompt: sidePrompt, imageBase64: sideBase64 });
+    const sideText = extractResponseText(sideData);
+    const sideResult = parseVisionResult(sideText);
+
+    return sideResult || topResult;
+  }
+
+  function handlePlanChoice(mode) {
+    setPlanMode(mode);
+    applyDefaultHandMap(meal.mealTime, mode);
+    setShowPlanChooser(false);
+  }
+
+  async function handlePhotoChange(event, type) {
     const file = event.target.files?.[0];
-    setMealPhotoName(file ? file.name : "");
+    if (!file) return;
+
+    let base64 = "";
+    try {
+      base64 = await readImageBase64(file);
+    } catch (error) {
+      console.error(error);
+      return;
+    }
+
+    const nextPhoto = {
+      name: file.name,
+      url: URL.createObjectURL(file),
+      base64,
+    };
+
+    const nextFront = type === "front" ? nextPhoto : photoFront;
+    const nextSide = type === "side" ? nextPhoto : photoSide;
+
+    if (type === "front") {
+      setPhotoFront(nextPhoto);
+    } else {
+      setPhotoSide(nextPhoto);
+    }
+
+    if (!nextFront.base64 || !nextSide.base64) {
+      return;
+    }
+
+    setIsAiProcessing(true);
+    try {
+      const result = await analyzeWithTwoPhotos({
+        frontBase64: nextFront.base64,
+        sideBase64: nextSide.base64,
+      });
+      if (result) {
+        setMealSafe({
+          desc: result.desc || meal.desc,
+          proteinPalms: Number(result.proteinPalms) || meal.proteinPalms,
+          carbCuppedHands: Number(result.carbCuppedHands) || meal.carbCuppedHands,
+          fatThumbs: Number(result.fatThumbs) || meal.fatThumbs,
+          vegFists: Number(result.vegFists) || meal.vegFists,
+        });
+      }
+      setShowPreview(true);
+    } catch (error) {
+      console.error(error);
+      setShowPreview(true);
+    } finally {
+      setIsAiProcessing(false);
+    }
   }
 
-function genPlan() {
-  const goal = (profile.goal || "").trim();
-  const kcal = est.kcal;
+  async function handleQuickAnalyze() {
+    if (!meal.desc.trim()) return;
+    setIsAiProcessing(true);
+    try {
+      const prompt = `用户描述了一餐：${meal.desc}。按拳掌法估算并返回JSON：{\"desc\":\"餐食名称\",\"proteinPalms\":1,\"carbCuppedHands\":1,\"fatThumbs\":1,\"vegFists\":1}。只返回JSON。`;
+      const data = await analyzeWithVision({ prompt });
+      const text = extractResponseText(data);
+      const result = parseVisionResult(text);
 
-  // 1) 下一步策略（按目标）
-  let strategy = "";
-  if (goal.includes("减脂")) {
-    strategy =
-      kcal > 650
-        ? "这餐偏高。下一餐建议：蛋白 1-1.5 掌 + 蔬菜 2 拳，主食减半（0-0.5 捧），油脂尽量少。"
-        : "这餐可控。下一餐建议：蛋白 1 掌 + 蔬菜 2 拳，主食 0.5-1 捧（看你训练强度）。";
-  } else if (goal.includes("增肌")) {
-    strategy =
-      kcal < 500
-        ? "这餐偏少。下一餐建议：蛋白 1.5-2 掌 + 主食 1-2 捧 + 蔬菜 1-2 拳，别怕碳水。"
-        : "这餐不错。下一餐建议：蛋白 1.5 掌 + 主食 1 捧 + 蔬菜 1-2 拳，油脂 1 拇指左右。";
-  } else {
-    // 维持/保持/未填写
-    strategy =
-      "下一餐建议：蛋白 1 掌 + 蔬菜 2 拳 + 主食 0.5-1 捧 + 油脂 1 拇指（按饥饿感微调）。";
+      if (result) {
+        setMealSafe({
+          desc: result.desc || meal.desc,
+          proteinPalms: Number(result.proteinPalms) || meal.proteinPalms,
+          carbCuppedHands: Number(result.carbCuppedHands) || meal.carbCuppedHands,
+          fatThumbs: Number(result.fatThumbs) || meal.fatThumbs,
+          vegFists: Number(result.vegFists) || meal.vegFists,
+        });
+      }
+
+      setShowPreview(true);
+    } catch (error) {
+      console.error(error);
+      setShowPreview(true);
+    } finally {
+      setIsAiProcessing(false);
+    }
   }
 
-  // 2) 摘要（保证一定存在）
-  const summary = `估算结果：约 ${est.kcal} kcal（蛋白 ${est.protein_g}g / 碳水 ${est.carbs_g}g / 脂肪 ${est.fat_g}g）。`;
+  function handleAvatarChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setProfile((prev) => ({ ...prev, avatar: reader.result }));
+    };
+    reader.readAsDataURL(file);
+  }
 
-  // 3) 安全提示（严苛语气也不要强制恐吓：直说即可）
-  const injuries = (profile.injuries || "").trim();
-  const safety = injuries
-    ? `伤病提示：你填写的是「${injuries}」。如疼痛加重或不明原因不适，建议先降强度并咨询专业人士。`
-    : "伤病提示：未填写。若有旧伤/疼痛史，建议补充。";
+  function genPlan() {
+    const goal = (profile.goal || "").trim();
+    const kcal = est.kcal;
+    let strategy = "";
+    if (goal.includes("减脂")) {
+      strategy =
+        kcal > 650
+          ? "这餐偏高。下一餐建议：蛋白 1-1.5 掌 + 蔬菜 2 拳，碳水减半（0-0.5 拳），油脂尽量少。"
+          : "这餐可控。下一餐建议：蛋白 1 掌 + 蔬菜 2 拳，碳水 0.5-1 拳（看你训练强度）。";
+    } else if (goal.includes("增肌")) {
+      strategy =
+        kcal < 500
+          ? "这餐偏少。下一餐建议：蛋白 1.5-2 掌 + 碳水 1-2 拳 + 蔬菜 1-2 拳，别怕碳水。"
+          : "这餐不错。下一餐建议：蛋白 1.5 掌 + 碳水 1 拳 + 蔬菜 1-2 拳，油脂 1 拇指左右。";
+    } else {
+      strategy =
+        "下一餐建议：蛋白 1 掌 + 蔬菜 2 拳 + 碳水 0.5-1 拳 + 油脂 1 拇指（按饥饿感微调）。";
+    }
 
-  // 4) 单一出口 setResult（不会出现 summary 未定义）
-  const newResult = {
-    timestamp: new Date().toLocaleString(),
-    summary: toneWrap(tone, summary),
-    plan: toneWrap(tone, strategy),
-    safety,
-    disclaimer: DISCLAIMER,
-    mealTime: meal.mealTime,
-    mealDesc: meal.desc?.trim() || "未命名餐食",
-    photoName: mealPhotoName,
-  };
+    const summary = `估算结果：约 ${est.kcal} kcal（蛋白 ${est.protein_g}g / 碳水 ${est.carbs_g}g / 脂肪 ${est.fat_g}g）。`;
 
-  setResult(newResult);
-  setHistory((prev) => [newResult, ...prev]);
-  setActiveTab("advice");
-}
+    const injuries = (profile.injuries || "").trim();
+    const safety = injuries
+      ? `伤病提示：你填写的是「${injuries}」。如疼痛加重或不明原因不适，建议先降强度并咨询专业人士。`
+      : "伤病提示：未填写。若有旧伤/疼痛史，建议补充。";
+
+    const photoNames = [photoFront.name, photoSide.name].filter(Boolean).join(" / ");
+    const newResult = {
+      timestamp: new Date().toLocaleString(),
+      summary: toneWrap(tone, summary),
+      plan: toneWrap(tone, strategy),
+      safety,
+      disclaimer: DISCLAIMER,
+      mealTime: meal.mealTime,
+      mealDesc: meal.desc?.trim() || "未命名餐食",
+      photoName: photoNames,
+    };
+
+    setResult(newResult);
+    setHistory((prev) => [newResult, ...prev]);
+    setShowToast(true);
+    setActiveTab("advice");
+  }
 
   function resetAll() {
     localStorage.removeItem("titan_profile");
     localStorage.removeItem("titan_tone");
     localStorage.removeItem("titan_is_training_today");
-    setProfile({ goal: "减脂", trainingFreq: "每周 3-4 次", injuries: "无", notes: "" });
+    setProfile({
+      name: "",
+      avatar: "",
+      age: "",
+      height: "",
+      weight: "",
+      chest: "",
+      waist: "",
+      hip: "",
+      goal: "减脂",
+      trainingFreq: "每周 3-4 次",
+      injuries: "无",
+      notes: "",
+    });
     setTone("pro");
     setIsTrainingToday(true);
     setCarbTouched(false);
@@ -323,9 +549,43 @@ function genPlan() {
       vegFists: 1,
       mealTime: "午餐",
     });
-    setMealPhotoName("");
+    setPhotoFront({ name: "", url: "", base64: "" });
+    setPhotoSide({ name: "", url: "", base64: "" });
     setResult(null);
+    setActiveTab("home");
+  }
+
+  function goToInput() {
+    setShowPreview(false);
+    setIsEditMode(false);
     setActiveTab("input");
+  }
+
+  function openEditMode() {
+    setShowPreview(false);
+    setIsEditMode(true);
+  }
+
+  function closeEditMode() {
+    setIsEditMode(false);
+  }
+
+  function handleDeepAdvice() {
+    if (!isSafetyGatePassed) {
+      setActiveTab("profile");
+      return;
+    }
+    if (history.length === 0) {
+      setCoachAdvice("暂无记录，先记录一餐再查看复盘。");
+      return;
+    }
+    const recentMeals = history.slice(0, 3);
+    const historySummary = recentMeals.map((item) => `${item.mealTime}：${item.mealDesc}`).join("；");
+    const mealCount = history.length;
+    const trendHint = mealCount <= 1
+      ? "今天记录较少，建议继续补全后再做综合复盘。"
+      : "今天已连续记录，注意均衡蛋白与蔬菜的分配。";
+    setCoachAdvice(`趋势复盘：今日已记录 ${mealCount} 餐。${historySummary ? `最近记录：${historySummary}。` : ""}${trendHint}`);
   }
 
   return (
@@ -333,14 +593,184 @@ function genPlan() {
       <div className="disclaimer-banner">{DISCLAIMER}</div>
       <div className="app">
         <header className="topbar">
-          <div className="app-title">{APP_TITLE}</div>
-          <div className="app-subtitle">饮食估算 · 训练日动态调整</div>
+          <div>
+            <div className="app-title">{APP_TITLE}</div>
+            <div className="app-subtitle">科技感 · 轻量饮食估算</div>
+          </div>
+          {!isSafetyGatePassed && (
+            <div className="safety-badge">请完善伤病史以解锁深度建议</div>
+          )}
         </header>
+        {showToast && (
+          <div className="toast">
+            <CheckCircle2 size={16} />
+            <span>已存入 Titan 日志</span>
+          </div>
+        )}
 
         <main className="content">
-          {activeTab === "profile" && (
-            <section className="card">
-              <h2>用户档案</h2>
+          {activeTab === "home" && !isEditMode && (
+            <section className="home-container">
+              <div className="home-header">
+                <h1 className="greeting-text">Coach Titan：<br />
+                  <span className="user-name">
+                    {(profile.name || "").trim() ? (
+                      `你好，${displayName}`
+                    ) : (
+                      <>你好，<span className="greeting-tip">请在档案页输入昵称</span></>
+                    )}
+                  </span>
+                </h1>
+              </div>
+
+              <div className="action-grid">
+                <button className="action-card primary" onClick={goToInput}>
+                  <div className="icon-circle big">
+                    <Camera size={36} strokeWidth={1.5} />
+                  </div>
+                  <div className="action-text">
+                    <span className="action-title">拍照记录</span>
+                    <span className="action-desc">双角度 + 参照物估算</span>
+                  </div>
+                </button>
+                <button className="action-card secondary" onClick={goToInput}>
+                  <div className="icon-circle">
+                    <PenLine size={28} strokeWidth={1.5} />
+                  </div>
+                  <div className="action-text">
+                    <span className="action-title">手动记录</span>
+                    <span className="action-desc">精准输入</span>
+                  </div>
+                </button>
+              </div>
+
+              <div className="quick-input-row">
+                <div className="input-group">
+                  <input
+                    value={meal.desc}
+                    onChange={(e) => setMealSafe({ desc: e.target.value })}
+                    placeholder="或者直接告诉我吃了什么..."
+                    className="clean-input"
+                  />
+                  <button className="send-icon-btn" onClick={handleQuickAnalyze} disabled={isAiProcessing}>
+                    <Send size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {history.length > 0 && (
+                <div className="home-card">
+                  <div className="home-title">最近记录</div>
+                  <div className="historyItem">
+                    <div className="historyHeader">
+                      <span>{history[0].mealTime}</span>
+                      <span>{history[0].timestamp}</span>
+                    </div>
+                    <div className="historyTitle">{history[0].mealDesc}</div>
+                    <div className="historyMeta">{history[0].summary}</div>
+                  </div>
+                </div>
+              )}
+
+              {showPreview && (
+                <div className="preview-card">
+                  <div className="preview-header">预览</div>
+                  <div className="preview-body">
+                    <div className="preview-images">
+                      {photoFront.url ? (
+                        <img src={photoFront.url} alt="front" className="preview-image" />
+                      ) : (
+                        <div className="preview-placeholder">俯拍</div>
+                      )}
+                      {photoSide.url ? (
+                        <img src={photoSide.url} alt="side" className="preview-image" />
+                      ) : (
+                        <div className="preview-placeholder">侧面</div>
+                      )}
+                    </div>
+                    <div className="preview-info">
+                      <div className="preview-title">{meal.desc || "未命名餐食"}</div>
+                      <div className="preview-meta">{meal.mealTime} · {est.kcal} kcal</div>
+                    </div>
+                  </div>
+                  <div className="preview-actions">
+                    <button className="primary" onClick={openEditMode}><PenLine size={18} className="mr-1" /> 微调分量</button>
+                    <button onClick={() => setShowPreview(false)}>关闭</button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {activeTab === "profile" && !isEditMode && (
+            <section className="profile-container">
+              <div className="profile-header-card">
+                <div className="avatar-section" onClick={() => avatarInputRef.current?.click()}>
+                  {profile.avatar ? (
+                    <img src={profile.avatar} alt="avatar" className="avatar-img" />
+                  ) : (
+                    <div className="avatar-placeholder"><User size={32} /></div>
+                  )}
+                  <div className="avatar-badge"><Upload size={12} /></div>
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarChange}
+                    style={{ display: "none" }}
+                  />
+                </div>
+                <div className="profile-info-edit">
+                  <label>昵称</label>
+                  <input
+                    className="ghost-input"
+                    value={profile.name}
+                    onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                    placeholder="点击设置昵称"
+                  />
+                </div>
+              </div>
+
+              <div className="section-label">身体数据</div>
+              <div className="stats-grid">
+                <ProfileStat
+                  label="年龄"
+                  value={profile.age}
+                  onChange={(value) => setProfile({ ...profile, age: value })}
+                />
+                <ProfileStat
+                  label="身高"
+                  unit="cm"
+                  value={profile.height}
+                  onChange={(value) => setProfile({ ...profile, height: value })}
+                />
+                <ProfileStat
+                  label="体重"
+                  unit="kg"
+                  value={profile.weight}
+                  onChange={(value) => setProfile({ ...profile, weight: value })}
+                />
+                <ProfileStat
+                  label="胸围"
+                  unit="cm"
+                  value={profile.chest}
+                  onChange={(value) => setProfile({ ...profile, chest: value })}
+                />
+                <ProfileStat
+                  label="腰围"
+                  unit="cm"
+                  value={profile.waist}
+                  onChange={(value) => setProfile({ ...profile, waist: value })}
+                />
+                <ProfileStat
+                  label="臀围"
+                  unit="cm"
+                  value={profile.hip}
+                  onChange={(value) => setProfile({ ...profile, hip: value })}
+                />
+              </div>
+
+              <div className="section-label">设置</div>
               <div className="formRow">
                 <label>目标</label>
                 <select
@@ -395,21 +825,63 @@ function genPlan() {
             </section>
           )}
 
-          {activeTab === "input" && (
+          {activeTab === "input" && !isEditMode && (
             <section className="card">
-              <h2>饮食输入</h2>
-              <div className="photo-upload">
-                <label className="photo-label">
+              <div className="header-row-back">
+                <button className="icon-btn-back" onClick={() => setActiveTab("home")}>
+                  <ChevronLeft size={24} />
+                </button>
+                <h2>饮食输入</h2>
+              </div>
+              <div className="photo-upload-box">
+                <div className="photo-instruction">
+                  <div className="photo-instruction-title">
+                    <CreditCard size={16} />
+                    <span>拍照估算</span>
+                  </div>
+                  <div className="photo-instruction-sub">请将银行卡/信用卡/交通卡放在食物旁拍摄</div>
+                  <div className="photo-instruction-sub">需要两张：俯拍 + 侧面</div>
+                </div>
+                <div className="photo-grid">
                   <input
+                    ref={frontInputRef}
                     type="file"
                     accept="image/*"
-                    onChange={handlePhotoChange}
+                    onChange={(event) => handlePhotoChange(event, "front")}
+                    className="hidden"
+                    style={{ display: "none" }}
                   />
-                  <div className="photo-title">拍照或上传（可选）</div>
-                  <div className="photo-subtitle">
-                    {mealPhotoName ? `已选择：${mealPhotoName}` : "点击选择一张照片"}
+                  <input
+                    ref={sideInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => handlePhotoChange(event, "side")}
+                    className="hidden"
+                    style={{ display: "none" }}
+                  />
+                  <button type="button" className="photo-slot" onClick={() => frontInputRef.current?.click()}>
+                    {photoFront.url ? (
+                      <img src={photoFront.url} alt="front" className="photo-thumb" />
+                    ) : (
+                      <Camera size={20} />
+                    )}
+                    <span>{photoFront.name ? "更换俯拍" : "上传俯拍"}</span>
+                  </button>
+                  <button type="button" className="photo-slot" onClick={() => sideInputRef.current?.click()}>
+                    {photoSide.url ? (
+                      <img src={photoSide.url} alt="side" className="photo-thumb" />
+                    ) : (
+                      <Camera size={20} />
+                    )}
+                    <span>{photoSide.name ? "更换侧面" : "上传侧面"}</span>
+                  </button>
+                </div>
+                <div className="photo-privacy">为方便测量，不会存入数据库</div>
+                {(photoFront.name || photoSide.name) && (
+                  <div className="photo-filenames">
+                    已选择：{photoFront.name || "未选俯拍"} / {photoSide.name || "未选侧面"}
                   </div>
-                </label>
+                )}
               </div>
 
               <div className="formRow twoCol">
@@ -456,7 +928,10 @@ function genPlan() {
 
               <div className="sliders">
                 <Slider
-                  label="蛋白（掌）"
+                  label="蛋白质"
+                  unit="掌"
+                  Icon={Beef}
+                  color="#22c55e"
                   value={meal.proteinPalms}
                   onChange={(v) => setMealSafe({ proteinPalms: v })}
                   min={0}
@@ -464,7 +939,10 @@ function genPlan() {
                   step={0.5}
                 />
                 <Slider
-                  label="主食（捧）"
+                  label="碳水"
+                  unit="拳"
+                  Icon={Wheat}
+                  color="#fde68a"
                   value={meal.carbCuppedHands}
                   onChange={(v) => {
                     setCarbTouched(true);
@@ -475,7 +953,10 @@ function genPlan() {
                   step={0.5}
                 />
                 <Slider
-                  label="油脂（拇指）"
+                  label="油脂"
+                  unit="指"
+                  Icon={Droplet}
+                  color="#f97316"
                   value={meal.fatThumbs}
                   onChange={(v) => setMealSafe({ fatThumbs: v })}
                   min={0}
@@ -483,7 +964,10 @@ function genPlan() {
                   step={0.5}
                 />
                 <Slider
-                  label="蔬菜（拳）"
+                  label="蔬菜"
+                  unit="拳"
+                  Icon={Leaf}
+                  color="#16a34a"
                   value={meal.vegFists}
                   onChange={(v) => setMealSafe({ vegFists: v })}
                   min={0}
@@ -502,16 +986,104 @@ function genPlan() {
               </div>
 
               <div className="actions">
-                <button className="primary" onClick={genPlan}>生成策略</button>
-                <button onClick={() => applyDefaultHandMap(meal.mealTime)}>套用默认拳掌法</button>
+                <button className="primary" onClick={genPlan}><Sparkles size={18} className="mr-1" /> 生成策略</button>
+                <button onClick={() => setShowPlanChooser(true)}>套用默认拳掌法</button>
                 <button onClick={resetAll}>重置</button>
+              </div>
+
+              {showPlanChooser && (
+                <div className="plan-chooser-overlay" onClick={() => setShowPlanChooser(false)}>
+                  <div className="plan-chooser-sheet" onClick={(event) => event.stopPropagation()}>
+                    <div className="plan-chooser-header">
+                      <span>选择拳掌法估算方式</span>
+                      <button className="icon-btn-back" onClick={() => setShowPlanChooser(false)}>
+                        <X size={20} />
+                      </button>
+                    </div>
+                    <button className="plan-option recommended center" onClick={() => handlePlanChoice("whtr")}>
+                      <div className="plan-option-title">更准确（推荐）</div>
+                      <div className="plan-option-desc">基于腰围 + 身高估算，更贴近体脂分析</div>
+                    </button>
+                    <button className="plan-option center" onClick={() => handlePlanChoice("basic")}>
+                      <div className="plan-option-title">基础估算</div>
+                      <div className="plan-option-desc">基于身高、体重、年龄与训练日快速生成</div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+
+          {isEditMode && (
+            <section className="edit-panel">
+              <div className="edit-header">
+                <div>微调分量</div>
+                <button onClick={closeEditMode} className="icon-btn"><Check size={24} /></button>
+              </div>
+              <div className="sliders">
+                <Slider
+                  label="蛋白质"
+                  unit="掌"
+                  Icon={Beef}
+                  color="#22c55e"
+                  value={meal.proteinPalms}
+                  onChange={(v) => setMealSafe({ proteinPalms: v })}
+                  min={0}
+                  max={8}
+                  step={0.5}
+                />
+                <Slider
+                  label="碳水"
+                  unit="拳"
+                  Icon={Wheat}
+                  color="#fde68a"
+                  value={meal.carbCuppedHands}
+                  onChange={(v) => {
+                    setCarbTouched(true);
+                    setMealSafe({ carbCuppedHands: v });
+                  }}
+                  min={0}
+                  max={8}
+                  step={0.5}
+                />
+                <Slider
+                  label="油脂"
+                  unit="指"
+                  Icon={Droplet}
+                  color="#f97316"
+                  value={meal.fatThumbs}
+                  onChange={(v) => setMealSafe({ fatThumbs: v })}
+                  min={0}
+                  max={8}
+                  step={0.5}
+                />
+                <Slider
+                  label="蔬菜"
+                  unit="拳"
+                  Icon={Leaf}
+                  color="#16a34a"
+                  value={meal.vegFists}
+                  onChange={(v) => setMealSafe({ vegFists: v })}
+                  min={0}
+                  max={8}
+                  step={0.5}
+                />
+              </div>
+              <div className="actions">
+                <button className="primary" onClick={genPlan}><Sparkles size={18} className="mr-1" /> 生成策略</button>
+                <button onClick={closeEditMode}><ChevronRight className="rotate-180 mr-1" size={18} /> 返回</button>
               </div>
             </section>
           )}
 
-          {activeTab === "advice" && (
+          {activeTab === "advice" && !isEditMode && (
             <section className="card">
-              <h2>规划建议</h2>
+              <div className="header-row-back">
+                <button className="icon-btn-back" onClick={() => setActiveTab("input")}>
+                  <ChevronLeft size={24} />
+                </button>
+                <h2>规划建议</h2>
+              </div>
               {!result ? (
                 <div className="muted">先在“饮食输入”里生成策略。</div>
               ) : (
@@ -540,9 +1112,20 @@ function genPlan() {
             </section>
           )}
 
-          {activeTab === "history" && (
+          {activeTab === "history" && !isEditMode && (
             <section className="card">
               <h2>每餐记录</h2>
+              <div className="historyActions">
+                <button className="secondary" onClick={handleDeepAdvice}>
+                  深度复盘
+                </button>
+                {!isSafetyGatePassed && (
+                  <button className="secondary" onClick={() => setActiveTab("profile")}>
+                    完善档案
+                  </button>
+                )}
+              </div>
+              {coachAdvice ? <div className="coachAdvice">{coachAdvice}</div> : null}
               {history.length === 0 ? (
                 <div className="muted">暂无记录。</div>
               ) : (
@@ -575,34 +1158,63 @@ function genPlan() {
         </main>
 
         <nav className="nav-bar">
-          <NavButton label="档案" id="profile" activeTab={activeTab} onSelect={setActiveTab} />
-          <NavButton label="输入" id="input" activeTab={activeTab} onSelect={setActiveTab} />
-          <NavButton label="建议" id="advice" activeTab={activeTab} onSelect={setActiveTab} />
-          <NavButton label="记录" id="history" activeTab={activeTab} onSelect={setActiveTab} />
+          <NavButton Icon={Camera} label="记录" id="home" activeTab={activeTab} onSelect={setActiveTab} />
+          <NavButton Icon={History} label="日志" id="history" activeTab={activeTab} onSelect={setActiveTab} />
+          <NavButton Icon={User} label="档案" id="profile" activeTab={activeTab} onSelect={setActiveTab} />
         </nav>
       </div>
     </>
   );
 }
 
-function NavButton({ label, id, activeTab, onSelect }) {
+function ProfileStat({ label, unit, value, onChange }) {
+  return (
+    <div className="stat-box">
+      <label>{label}</label>
+      <div className="stat-input">
+        <input
+          type="number"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="-"
+        />
+        {unit ? <span className="stat-unit">{unit}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function NavButton({ label, Icon, id, activeTab, onSelect }) {
   const isActive = activeTab === id;
   return (
     <button
-      className={`nav-button${isActive ? " active" : ""}`}
+      className={`flex flex-col items-center justify-center w-full py-1 gap-1 transition-all duration-200 ${isActive ? "text-[#1b4332]" : "text-gray-400"}`}
       onClick={() => onSelect(id)}
     >
-      {label}
+      <div className={`p-1 rounded-full transition-all duration-200 ${isActive ? "bg-[#b7e4c7]" : ""}`}>
+        <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+      </div>
+      <span className="text-[10px] font-medium">{label}</span>
     </button>
   );
 }
 
-function Slider({ label, value, onChange, min, max, step = 1 }) {
+function Slider({ label, unit, Icon, color, value, onChange, min, max, step = 1 }) {
+  const percent = max === min ? 0 : ((value - min) / (max - min)) * 100;
+
   return (
-    <div className="sliderRow">
-      <div className="sliderHeader">
-        <span>{label}</span>
-        <b>{value}</b>
+    <div className="slider-card">
+      <div className="slider-head">
+        <div className="slider-label">
+          <span className="slider-icon" style={{ color }}>
+            <Icon size={18} />
+          </span>
+          <span className="slider-title">{label}</span>
+        </div>
+        <div className="slider-value" style={{ color }}>
+          {value}
+          <span className="slider-unit">{unit}</span>
+        </div>
       </div>
       <input
         type="range"
@@ -611,6 +1223,11 @@ function Slider({ label, value, onChange, min, max, step = 1 }) {
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
+        className="slider-input"
+        style={{
+          background: `linear-gradient(to right, ${color} ${percent}%, #e5e7eb ${percent}%)`,
+          color,
+        }}
       />
     </div>
   );
