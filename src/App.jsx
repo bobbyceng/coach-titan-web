@@ -841,6 +841,7 @@ export default function App() {
                   </div>
                   <div className="photo-instruction-sub">请将银行卡/信用卡/交通卡放在食物旁拍摄</div>
                   <div className="photo-instruction-sub">需要两张：俯拍 + 侧面</div>
+                  <div className="photo-instruction-note">光线、距离、倾斜会影响识图，尽量明亮、平拍、靠近食物</div>
                 </div>
                 <div className="photo-grid">
                   <input

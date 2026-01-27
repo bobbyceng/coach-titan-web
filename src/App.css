@@ -456,6 +456,11 @@ input[type="range"]::-webkit-slider-thumb {
   color: var(--text-secondary);
 }
 
+.photo-instruction-note {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
 .photo-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
