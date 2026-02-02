@@ -22,13 +22,30 @@ import "./App.css";
 
 const APP_TITLE = "Coach Titan";
 const DISCLAIMER =
-  "免责声明：本工具仅供参考与面试演示用途，不构成医疗/营养/训练处方。存在疾病、受伤、孕期或进食障碍风险请咨询医生或注册营养师。";
+  "免责声明：本工具基于常见营养学估算方法（拳掌法 + 基础代谢估算）仅供参考，不构成医疗/营养/训练处方。存在疾病、受伤、孕期或进食障碍风险请咨询医生或注册营养师。";
+const SCHEMA_VERSION = 1;
 
 const TONES = [
   { key: "pro", label: "理性" },
   { key: "casual", label: "随性" },
   { key: "strict", label: "严苛" },
 ];
+
+const DEFAULT_PROFILE = {
+  name: "",
+  avatar: "",
+  gender: "",
+  age: "",
+  height: "",
+  weight: "",
+  chest: "",
+  waist: "",
+  hip: "",
+  goal: "减脂",
+  trainingFreq: "每周 3-4 次",
+  injuries: "无",
+  notes: "",
+};
 
 const DEFAULT_HAND_MAP = {
   "减脂": {
@@ -98,6 +115,42 @@ function getRecommendedCarb(goal, mealTime, isTrainingToday, trainingFreq) {
   return baseNum + delta;
 }
 
+function getActivityFactor(trainingFreq) {
+  const days = parseTrainingDaysPerWeek(trainingFreq);
+  if (days === null) return 1.4;
+  if (days <= 2) return 1.4;
+  if (days <= 4) return 1.55;
+  if (days <= 6) return 1.7;
+  return 1.8;
+}
+
+function estimateDailyCalories(profile) {
+  const weight = Number(profile.weight);
+  const height = Number(profile.height);
+  const age = Number(profile.age);
+  if (!Number.isFinite(weight) || !Number.isFinite(height) || !Number.isFinite(age)) {
+    return null;
+  }
+  if (weight <= 0 || height <= 0 || age <= 0) return null;
+
+  const gender = (profile.gender || "").trim();
+  const genderOffset = gender === "male" ? 5 : gender === "female" ? -161 : 0;
+  const bmr = 10 * weight + 6.25 * height - 5 * age + genderOffset;
+  const activity = getActivityFactor(profile.trainingFreq);
+  const tdee = bmr * activity;
+  const goal = (profile.goal || "维持").trim();
+  let target = tdee;
+  if (goal.includes("减脂")) target = tdee * 0.85;
+  if (goal.includes("增肌")) target = tdee * 1.1;
+
+  return {
+    bmr: Math.round(bmr),
+    tdee: Math.round(tdee),
+    target: Math.round(target),
+    perMeal: Math.round(target / 3),
+  };
+}
+
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
@@ -129,6 +182,66 @@ function toneWrap(toneKey, text) {
   return text;
 }
 
+function makeId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function getDateKey(dateInput) {
+  const date = dateInput instanceof Date ? dateInput : new Date(dateInput || Date.now());
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateKeyToDate(dateKey) {
+  if (!dateKey) return null;
+  const [year, month, day] = dateKey.split("-").map((value) => Number(value));
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+}
+
+function formatAmount(value) {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function normalizeHistoryEntry(entry) {
+  const safe = entry && typeof entry === "object" ? entry : {};
+  const timestamp = safe.timestamp || new Date().toLocaleString();
+  const dateKey = safe.dateKey || getDateKey(timestamp);
+
+  return {
+    ...safe,
+    id: safe.id || makeId(),
+    schemaVersion: safe.schemaVersion || SCHEMA_VERSION,
+    timestamp,
+    dateKey,
+    mealTime: safe.mealTime || "午餐",
+    mealDesc: safe.mealDesc || "未命名餐食",
+    kcal: Number(safe.kcal ?? 0),
+    proteinPalms: Number(safe.proteinPalms ?? 0),
+    carbCuppedHands: Number(safe.carbCuppedHands ?? 0),
+    fatThumbs: Number(safe.fatThumbs ?? 0),
+    vegFists: Number(safe.vegFists ?? 0),
+    goal: safe.goal || "维持",
+    summary: safe.summary || "",
+    plan: safe.plan || "",
+    safety: safe.safety || "",
+    disclaimer: safe.disclaimer || DISCLAIMER,
+    photoName: safe.photoName || "",
+  };
+}
+
+function normalizeHistory(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries.map((item) => normalizeHistoryEntry(item));
+}
+
 function loadLS(key, fallback) {
   try {
     const raw = localStorage.getItem(key);
@@ -145,7 +258,9 @@ function saveLS(key, value) {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("home");
-  const [history, setHistory] = useState(() => loadLS("titan_history", []));
+  const [history, setHistory] = useState(() =>
+    normalizeHistory(loadLS("titan_history", []))
+  );
   const [isEditMode, setIsEditMode] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showToast, setShowToast] = useState(false);
@@ -160,6 +275,9 @@ export default function App() {
   const frontInputRef = useRef(null);
   const sideInputRef = useRef(null);
   const avatarInputRef = useRef(null);
+  const importInputRef = useRef(null);
+
+  const [backupStatus, setBackupStatus] = useState("");
 
   const [carbTouched, setCarbTouched] = useState(false);
   const [meal, _setMeal] = useState({
@@ -172,20 +290,7 @@ export default function App() {
   });
 
   const [profile, setProfile] = useState(() =>
-    loadLS("titan_profile", {
-      name: "",
-      avatar: "",
-      age: "",
-      height: "",
-      weight: "",
-      chest: "",
-      waist: "",
-      hip: "",
-      goal: "减脂",
-      trainingFreq: "每周 3-4 次",
-      injuries: "无",
-      notes: "",
-    })
+    loadLS("titan_profile", DEFAULT_PROFILE)
   );
 
   const [tone, setTone] = useState(() => loadLS("titan_tone", "pro"));
@@ -235,6 +340,69 @@ export default function App() {
   }, [photoSide.url]);
 
   const est = useMemo(() => estimateMealByHand(meal), [meal]);
+
+  const todayKey = getDateKey(new Date());
+  const todayMeals = useMemo(
+    () => history.filter((item) => item.dateKey === todayKey),
+    [history, todayKey]
+  );
+  const todayTotals = useMemo(() => {
+    return todayMeals.reduce(
+      (acc, item) => {
+        acc.kcal += item.kcal || 0;
+        acc.protein += item.proteinPalms || 0;
+        acc.carb += item.carbCuppedHands || 0;
+        acc.fat += item.fatThumbs || 0;
+        acc.veg += item.vegFists || 0;
+        return acc;
+      },
+      {
+        mealCount: todayMeals.length,
+        kcal: 0,
+        protein: 0,
+        carb: 0,
+        fat: 0,
+        veg: 0,
+      }
+    );
+  }, [todayMeals]);
+
+  const weekMeals = useMemo(() => {
+    const cutoff = new Date();
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - 6);
+    return history.filter((item) => {
+      const date = parseDateKeyToDate(item.dateKey) || new Date(item.timestamp);
+      if (Number.isNaN(date.getTime())) return false;
+      return date >= cutoff;
+    });
+  }, [history]);
+
+  const weekSummary = useMemo(() => {
+    if (weekMeals.length === 0) return null;
+    const totals = weekMeals.reduce(
+      (acc, item) => {
+        acc.kcal += item.kcal || 0;
+        acc.protein += item.proteinPalms || 0;
+        acc.veg += item.vegFists || 0;
+        return acc;
+      },
+      { kcal: 0, protein: 0, veg: 0 }
+    );
+    const mealCount = weekMeals.length;
+    const avgKcal = Math.round(totals.kcal / mealCount);
+    const avgProtein = totals.protein / mealCount;
+    const avgVeg = totals.veg / mealCount;
+    const hint = avgVeg >= 1.5 ? "蔬菜摄入较稳" : "蔬菜偏少，优先补一拳";
+
+    return {
+      mealCount,
+      avgKcal,
+      avgProtein,
+      avgVeg,
+      hint,
+    };
+  }, [weekMeals]);
 
   function setMealSafe(patch) {
     _setMeal((prev) => {
@@ -360,7 +528,7 @@ export default function App() {
 
   async function analyzeWithTwoPhotos({ frontBase64, sideBase64 }) {
     const topPrompt =
-      "这是俯拍图，旁边有银行卡/信用卡/交通卡作参照。请识别食物并按拳掌法估算，返回JSON：{\"desc\":\"餐食名称\",\"proteinPalms\":1,\"carbCuppedHands\":1,\"fatThumbs\":1,\"vegFists\":1}。只返回JSON。";
+      "这是俯拍图，旁边可能有参照物（如手掌、餐具或手机）。请识别食物并按拳掌法估算，返回JSON：{\"desc\":\"餐食名称\",\"proteinPalms\":1,\"carbCuppedHands\":1,\"fatThumbs\":1,\"vegFists\":1}。只返回JSON。";
     const topData = await analyzeWithVision({ prompt: topPrompt, imageBase64: frontBase64 });
     const topText = extractResponseText(topData);
     const topResult = parseVisionResult(topText);
@@ -369,7 +537,7 @@ export default function App() {
 
     const basePayload = topResult ? JSON.stringify(topResult) : "{}";
     const sidePrompt =
-      `这是侧面图，旁边有银行卡/信用卡/交通卡作参照。上一张俯拍估算为：${basePayload}。请结合侧面图修正份量，返回JSON：{"desc":"餐食名称","proteinPalms":1,"carbCuppedHands":1,"fatThumbs":1,"vegFists":1}。只返回JSON。`;
+      `这是侧面图，旁边可能有参照物（如手掌、餐具或手机）。上一张俯拍估算为：${basePayload}。请结合侧面图修正份量，返回JSON：{"desc":"餐食名称","proteinPalms":1,"carbCuppedHands":1,"fatThumbs":1,"vegFists":1}。只返回JSON。`;
     const sideData = await analyzeWithVision({ prompt: sidePrompt, imageBase64: sideBase64 });
     const sideText = extractResponseText(sideData);
     const sideResult = parseVisionResult(sideText);
@@ -442,7 +610,7 @@ export default function App() {
     if (!meal.desc.trim()) return;
     setIsAiProcessing(true);
     try {
-      const prompt = `用户描述了一餐：${meal.desc}。按拳掌法估算并返回JSON：{\"desc\":\"餐食名称\",\"proteinPalms\":1,\"carbCuppedHands\":1,\"fatThumbs\":1,\"vegFists\":1}。只返回JSON。`;
+      const prompt = `用户描述了一餐：${meal.desc}。按拳掌法估算并返回JSON：{"desc":"餐食名称","proteinPalms":1,"carbCuppedHands":1,"fatThumbs":1,"vegFists":1}。只返回JSON。`;
       const data = await analyzeWithVision({ prompt });
       const text = extractResponseText(data);
       const result = parseVisionResult(text);
@@ -476,18 +644,122 @@ export default function App() {
     reader.readAsDataURL(file);
   }
 
+  function buildBackupData() {
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
+      titan_profile: profile,
+      titan_tone: tone,
+      titan_is_training_today: isTrainingToday,
+      titan_history: history,
+    };
+  }
+
+  async function handleExportBackup() {
+    try {
+      const data = buildBackupData();
+      const json = JSON.stringify(data, null, 2);
+      const filename = `coach-titan-backup-${getDateKey(new Date())}.json`;
+
+      if (typeof window !== "undefined" && window.showSaveFilePicker) {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [
+            {
+              description: "JSON",
+              accept: { "application/json": [".json"] },
+            },
+          ],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(json);
+        await writable.close();
+      } else {
+        const blob = new Blob([json], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+      setBackupStatus("备份已导出");
+    } catch (error) {
+      console.error(error);
+      setBackupStatus("导出失败，请重试");
+    }
+  }
+
+  function handleImportClick() {
+    importInputRef.current?.click();
+  }
+
+  async function handleImportChange(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (!data || typeof data !== "object") {
+        setBackupStatus("备份文件格式不正确");
+        return;
+      }
+      if (data.schemaVersion && data.schemaVersion > SCHEMA_VERSION) {
+        setBackupStatus("备份版本较新，暂不支持导入");
+        return;
+      }
+      const hasKeys =
+        data.titan_profile &&
+        data.titan_tone !== undefined &&
+        data.titan_is_training_today !== undefined &&
+        Array.isArray(data.titan_history);
+      if (!hasKeys) {
+        setBackupStatus("备份文件缺少必要字段");
+        return;
+      }
+
+      const confirmed = window.confirm("导入将覆盖当前数据，是否继续？");
+      if (!confirmed) {
+        setBackupStatus("已取消导入");
+        return;
+      }
+
+      const nextProfile = { ...DEFAULT_PROFILE, ...data.titan_profile };
+      setProfile(nextProfile);
+      setTone(data.titan_tone || "pro");
+      setIsTrainingToday(Boolean(data.titan_is_training_today));
+      setHistory(normalizeHistory(data.titan_history));
+      setResult(null);
+      setShowPreview(false);
+      setIsEditMode(false);
+      setActiveTab("home");
+      setBackupStatus("备份已恢复");
+    } catch (error) {
+      console.error(error);
+      setBackupStatus("导入失败，请检查文件");
+    } finally {
+      event.target.value = "";
+    }
+  }
+
   function genPlan() {
     const goal = (profile.goal || "").trim();
     const kcal = est.kcal;
+    const dailyEstimate = estimateDailyCalories(profile);
+    const basePerMeal = dailyEstimate?.perMeal
+      || (goal.includes("减脂") ? 500 : goal.includes("增肌") ? 650 : 550);
+    const highLine = basePerMeal * 1.15;
+    const lowLine = basePerMeal * 0.85;
     let strategy = "";
     if (goal.includes("减脂")) {
       strategy =
-        kcal > 650
+        kcal > highLine
           ? "这餐偏高。下一餐建议：蛋白 1-1.5 掌 + 蔬菜 2 拳，碳水减半（0-0.5 拳），油脂尽量少。"
           : "这餐可控。下一餐建议：蛋白 1 掌 + 蔬菜 2 拳，碳水 0.5-1 拳（看你训练强度）。";
     } else if (goal.includes("增肌")) {
       strategy =
-        kcal < 500
+        kcal < lowLine
           ? "这餐偏少。下一餐建议：蛋白 1.5-2 掌 + 碳水 1-2 拳 + 蔬菜 1-2 拳，别怕碳水。"
           : "这餐不错。下一餐建议：蛋白 1.5 掌 + 碳水 1 拳 + 蔬菜 1-2 拳，油脂 1 拇指左右。";
     } else {
@@ -495,7 +767,11 @@ export default function App() {
         "下一餐建议：蛋白 1 掌 + 蔬菜 2 拳 + 碳水 0.5-1 拳 + 油脂 1 拇指（按饥饿感微调）。";
     }
 
-    const summary = `估算结果：约 ${est.kcal} kcal（蛋白 ${est.protein_g}g / 碳水 ${est.carbs_g}g / 脂肪 ${est.fat_g}g）。`;
+    const now = new Date();
+    const dailyNote = dailyEstimate
+      ? `参考日目标约 ${dailyEstimate.target} kcal（约 ${dailyEstimate.perMeal} kcal/餐）`
+      : "";
+    const summary = `估算结果：约 ${est.kcal} kcal（蛋白 ${est.protein_g}g / 碳水 ${est.carbs_g}g / 脂肪 ${est.fat_g}g）。${dailyNote ? ` ${dailyNote}` : ""}`;
 
     const injuries = (profile.injuries || "").trim();
     const safety = injuries
@@ -503,8 +779,11 @@ export default function App() {
       : "伤病提示：未填写。若有旧伤/疼痛史，建议补充。";
 
     const photoNames = [photoFront.name, photoSide.name].filter(Boolean).join(" / ");
-    const newResult = {
-      timestamp: new Date().toLocaleString(),
+    const newResult = normalizeHistoryEntry({
+      id: makeId(),
+      schemaVersion: SCHEMA_VERSION,
+      timestamp: now.toLocaleString(),
+      dateKey: getDateKey(now),
       summary: toneWrap(tone, summary),
       plan: toneWrap(tone, strategy),
       safety,
@@ -512,7 +791,13 @@ export default function App() {
       mealTime: meal.mealTime,
       mealDesc: meal.desc?.trim() || "未命名餐食",
       photoName: photoNames,
-    };
+      kcal: est.kcal,
+      proteinPalms: meal.proteinPalms,
+      carbCuppedHands: meal.carbCuppedHands,
+      fatThumbs: meal.fatThumbs,
+      vegFists: meal.vegFists,
+      goal: profile.goal,
+    });
 
     setResult(newResult);
     setHistory((prev) => [newResult, ...prev]);
@@ -630,7 +915,7 @@ export default function App() {
                   </div>
                   <div className="action-text">
                     <span className="action-title">拍照记录</span>
-                    <span className="action-desc">双角度 + 参照物估算</span>
+                    <span className="action-desc">双角度 · 参照物可选</span>
                   </div>
                 </button>
                 <button className="action-card secondary" onClick={goToInput}>
@@ -656,6 +941,22 @@ export default function App() {
                     <Send size={20} />
                   </button>
                 </div>
+              </div>
+
+              <div className="home-card">
+                <div className="home-title">今日概览</div>
+                {todayTotals.mealCount === 0 ? (
+                  <div className="historyMeta">今天还没记录，先记录一餐。</div>
+                ) : (
+                  <>
+                    <div className="historyMeta">
+                      已记录 {todayTotals.mealCount} 餐 · 约 {formatAmount(todayTotals.kcal)} kcal
+                    </div>
+                    <div className="historyMeta">
+                      蛋白 {formatAmount(todayTotals.protein)} 掌 · 碳水 {formatAmount(todayTotals.carb)} 拳 · 油脂 {formatAmount(todayTotals.fat)} 指 · 蔬菜 {formatAmount(todayTotals.veg)} 拳
+                    </div>
+                  </>
+                )}
               </div>
 
               {history.length > 0 && (
@@ -732,6 +1033,17 @@ export default function App() {
               </div>
 
               <div className="section-label">身体数据</div>
+              <div className="formRow">
+                <label>性别</label>
+                <select
+                  value={profile.gender}
+                  onChange={(e) => setProfile({ ...profile, gender: e.target.value })}
+                >
+                  <option value="">未填写</option>
+                  <option value="female">女性</option>
+                  <option value="male">男性</option>
+                </select>
+              </div>
               <div className="stats-grid">
                 <ProfileStat
                   label="年龄"
@@ -822,6 +1134,24 @@ export default function App() {
                   ))}
                 </select>
               </div>
+
+              <div className="section-label">数据备份</div>
+              <div className="actions">
+                <button type="button" className="secondary" onClick={handleExportBackup}>
+                  导出备份
+                </button>
+                <button type="button" className="secondary" onClick={handleImportClick}>
+                  导入备份
+                </button>
+              </div>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json"
+                onChange={handleImportChange}
+                style={{ display: "none" }}
+              />
+              {backupStatus ? <div className="muted">{backupStatus}</div> : null}
             </section>
           )}
 
@@ -839,8 +1169,8 @@ export default function App() {
                     <CreditCard size={16} />
                     <span>拍照估算</span>
                   </div>
-                  <div className="photo-instruction-sub">请将银行卡/信用卡/交通卡放在食物旁拍摄</div>
-                  <div className="photo-instruction-sub">需要两张：俯拍 + 侧面</div>
+                  <div className="photo-instruction-sub">参照物可选：手掌 / 手机 / 餐具，帮助估算更准</div>
+                  <div className="photo-instruction-sub">没有参照物也可以继续记录</div>
                   <div className="photo-instruction-note">光线、距离、倾斜会影响识图，尽量明亮、平拍、靠近食物</div>
                 </div>
                 <div className="photo-grid">
@@ -1088,27 +1418,38 @@ export default function App() {
               {!result ? (
                 <div className="muted">先在“饮食输入”里生成策略。</div>
               ) : (
-                <div className="output">
-                  <div className="bubble">
-                    <b>结果摘要</b>
-                    <p>{result.summary}</p>
+                <>
+                  <div className="output">
+                    <div className="bubble">
+                      <b>结果摘要</b>
+                      <p>{result.summary}</p>
+                    </div>
+                    <div className="bubble">
+                      <b>下一步建议</b>
+                      <p>{result.plan}</p>
+                      {meal.desc?.trim() ? (
+                        <p className="small">餐食描述：{meal.mealTime}「{meal.desc}」</p>
+                      ) : null}
+                    </div>
+                    <div className="bubble">
+                      <b>AI 解释（预留）</b>
+                      <p>后续可接入模型，生成更细化的个性化说明。</p>
+                    </div>
+                    <div className="bubble warn">
+                      <b>安全提示</b>
+                      <p>{result.safety}</p>
+                    </div>
                   </div>
-                  <div className="bubble">
-                    <b>下一步建议</b>
-                    <p>{result.plan}</p>
-                    {meal.desc?.trim() ? (
-                      <p className="small">餐食描述：{meal.mealTime}「{meal.desc}」</p>
-                    ) : null}
+                  <div className="actions">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setActiveTab("history")}
+                    >
+                      查看日志
+                    </button>
                   </div>
-                  <div className="bubble">
-                    <b>AI 解释（预留）</b>
-                    <p>后续可接入模型，生成更细化的个性化说明。</p>
-                  </div>
-                  <div className="bubble warn">
-                    <b>安全提示</b>
-                    <p>{result.safety}</p>
-                  </div>
-                </div>
+                </>
               )}
             </section>
           )}
@@ -1126,13 +1467,30 @@ export default function App() {
                   </button>
                 )}
               </div>
+              {history.length > 0 && (
+                weekSummary ? (
+                  <div className="home-card">
+                    <div className="home-title">近 7 天复盘</div>
+                    <div className="historyMeta">
+                      共 {weekSummary.mealCount} 餐 · 平均 {weekSummary.avgKcal} kcal/餐
+                    </div>
+                    <div className="historyMeta">
+                      蛋白 {formatAmount(weekSummary.avgProtein)} 掌/餐 · 蔬菜 {formatAmount(weekSummary.avgVeg)} 拳/餐
+                    </div>
+                    <div className="historyMeta">{weekSummary.hint}</div>
+                  </div>
+                ) : (
+                  <div className="muted">近 7 天暂无可复盘记录。</div>
+                )
+              )}
               {coachAdvice ? <div className="coachAdvice">{coachAdvice}</div> : null}
               {history.length === 0 ? (
                 <div className="muted">暂无记录。</div>
               ) : (
                 <div className="historyList">
-                  {history.map((item, index) => (
-                    <div className="historyItem" key={`${item.timestamp}-${index}`}>
+                    {history.map((item, index) => (
+                      <div className="historyItem" key={item.id || `${item.timestamp}-${index}`}>
+
                       <div className="historyHeader">
                         <span>{item.mealTime}</span>
                         <span>{item.timestamp}</span>
