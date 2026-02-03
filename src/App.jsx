@@ -261,6 +261,7 @@ export default function App() {
   const [history, setHistory] = useState(() =>
     normalizeHistory(loadLS("titan_history", []))
   );
+  const [inputMode, setInputMode] = useState("auto");
   const [isEditMode, setIsEditMode] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showToast, setShowToast] = useState(false);
@@ -276,6 +277,7 @@ export default function App() {
   const sideInputRef = useRef(null);
   const avatarInputRef = useRef(null);
   const importInputRef = useRef(null);
+  const descInputRef = useRef(null);
 
   const [backupStatus, setBackupStatus] = useState("");
 
@@ -806,26 +808,13 @@ export default function App() {
   }
 
   function resetAll() {
-    localStorage.removeItem("titan_profile");
-    localStorage.removeItem("titan_tone");
-    localStorage.removeItem("titan_is_training_today");
-    setProfile({
-      name: "",
-      avatar: "",
-      age: "",
-      height: "",
-      weight: "",
-      chest: "",
-      waist: "",
-      hip: "",
-      goal: "减脂",
-      trainingFreq: "每周 3-4 次",
-      injuries: "无",
-      notes: "",
-    });
+    if (!window.confirm("确定清空本地数据与照片吗？")) return;
+    setProfile(DEFAULT_PROFILE);
+    setHistory([]);
     setTone("pro");
     setIsTrainingToday(true);
     setCarbTouched(false);
+    setInputMode("auto");
     setMealSafe({
       desc: "",
       proteinPalms: 1,
@@ -840,10 +829,15 @@ export default function App() {
     setActiveTab("home");
   }
 
-  function goToInput() {
+
+  function goToInput(mode = "auto") {
+    setInputMode(mode);
     setShowPreview(false);
     setIsEditMode(false);
     setActiveTab("input");
+    if (mode === "manual") {
+      setTimeout(() => descInputRef.current?.focus(), 0);
+    }
   }
 
   function openEditMode() {
@@ -909,7 +903,7 @@ export default function App() {
               </div>
 
               <div className="action-grid">
-                <button className="action-card primary" onClick={goToInput}>
+                <button className="action-card primary" onClick={() => goToInput("photo")}>
                   <div className="icon-circle big">
                     <Camera size={36} strokeWidth={1.5} />
                   </div>
@@ -918,15 +912,16 @@ export default function App() {
                     <span className="action-desc">双角度 · 参照物可选</span>
                   </div>
                 </button>
-                <button className="action-card secondary" onClick={goToInput}>
+                <button className="action-card secondary" onClick={() => goToInput("manual")}>
                   <div className="icon-circle">
                     <PenLine size={28} strokeWidth={1.5} />
                   </div>
                   <div className="action-text">
-                    <span className="action-title">手动记录</span>
-                    <span className="action-desc">精准输入</span>
+                    <span className="action-title">快速输入</span>
+                    <span className="action-desc">一句话生成建议</span>
                   </div>
                 </button>
+
               </div>
 
               <div className="quick-input-row">
@@ -1161,59 +1156,61 @@ export default function App() {
                 <button className="icon-btn-back" onClick={() => setActiveTab("home")}>
                   <ChevronLeft size={24} />
                 </button>
-                <h2>饮食输入</h2>
+                <h2>{inputMode === "photo" ? "拍照记录" : "快速输入"}</h2>
               </div>
-              <div className="photo-upload-box">
-                <div className="photo-instruction">
-                  <div className="photo-instruction-title">
-                    <CreditCard size={16} />
-                    <span>拍照估算</span>
+              {inputMode !== "manual" && (
+                <div className="photo-upload-box">
+                  <div className="photo-instruction">
+                    <div className="photo-instruction-title">
+                      <CreditCard size={16} />
+                      <span>拍照估算</span>
+                    </div>
+                    <div className="photo-instruction-sub">参照物可选：手掌 / 手机 / 餐具，帮助估算更准</div>
+                    <div className="photo-instruction-sub">没有参照物也可以继续记录</div>
+                    <div className="photo-instruction-note">光线、距离、倾斜会影响识图，尽量明亮、平拍、靠近食物</div>
                   </div>
-                  <div className="photo-instruction-sub">参照物可选：手掌 / 手机 / 餐具，帮助估算更准</div>
-                  <div className="photo-instruction-sub">没有参照物也可以继续记录</div>
-                  <div className="photo-instruction-note">光线、距离、倾斜会影响识图，尽量明亮、平拍、靠近食物</div>
-                </div>
-                <div className="photo-grid">
-                  <input
-                    ref={frontInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => handlePhotoChange(event, "front")}
-                    className="hidden"
-                    style={{ display: "none" }}
-                  />
-                  <input
-                    ref={sideInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={(event) => handlePhotoChange(event, "side")}
-                    className="hidden"
-                    style={{ display: "none" }}
-                  />
-                  <button type="button" className="photo-slot" onClick={() => frontInputRef.current?.click()}>
-                    {photoFront.url ? (
-                      <img src={photoFront.url} alt="front" className="photo-thumb" />
-                    ) : (
-                      <Camera size={20} />
-                    )}
-                    <span>{photoFront.name ? "更换俯拍" : "上传俯拍"}</span>
-                  </button>
-                  <button type="button" className="photo-slot" onClick={() => sideInputRef.current?.click()}>
-                    {photoSide.url ? (
-                      <img src={photoSide.url} alt="side" className="photo-thumb" />
-                    ) : (
-                      <Camera size={20} />
-                    )}
-                    <span>{photoSide.name ? "更换侧面" : "上传侧面"}</span>
-                  </button>
-                </div>
-                <div className="photo-privacy">为方便测量，不会存入数据库</div>
-                {(photoFront.name || photoSide.name) && (
-                  <div className="photo-filenames">
-                    已选择：{photoFront.name || "未选俯拍"} / {photoSide.name || "未选侧面"}
+                  <div className="photo-grid">
+                    <input
+                      ref={frontInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => handlePhotoChange(event, "front")}
+                      className="hidden"
+                      style={{ display: "none" }}
+                    />
+                    <input
+                      ref={sideInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) => handlePhotoChange(event, "side")}
+                      className="hidden"
+                      style={{ display: "none" }}
+                    />
+                    <button type="button" className="photo-slot" onClick={() => frontInputRef.current?.click()}>
+                      {photoFront.url ? (
+                        <img src={photoFront.url} alt="front" className="photo-thumb" />
+                      ) : (
+                        <Camera size={20} />
+                      )}
+                      <span>{photoFront.name ? "更换俯拍" : "上传俯拍"}</span>
+                    </button>
+                    <button type="button" className="photo-slot" onClick={() => sideInputRef.current?.click()}>
+                      {photoSide.url ? (
+                        <img src={photoSide.url} alt="side" className="photo-thumb" />
+                      ) : (
+                        <Camera size={20} />
+                      )}
+                      <span>{photoSide.name ? "更换侧面" : "上传侧面"}</span>
+                    </button>
                   </div>
-                )}
-              </div>
+                  <div className="photo-privacy">为方便测量，不会存入数据库</div>
+                  {(photoFront.name || photoSide.name) && (
+                    <div className="photo-filenames">
+                      已选择：{photoFront.name || "未选俯拍"} / {photoSide.name || "未选侧面"}
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="formRow twoCol">
                 <div>
@@ -1251,6 +1248,7 @@ export default function App() {
               <div className="formRow">
                 <label>餐食描述</label>
                 <input
+                  ref={descInputRef}
                   value={meal.desc}
                   onChange={(e) => setMealSafe({ desc: e.target.value })}
                   placeholder="例如：牛肉饭 + 青菜"
@@ -1317,9 +1315,32 @@ export default function App() {
               </div>
 
               <div className="actions">
-                <button className="primary" onClick={genPlan}><Sparkles size={18} className="mr-1" /> 生成策略</button>
-                <button onClick={() => setShowPlanChooser(true)}>套用默认拳掌法</button>
-                <button onClick={resetAll}>重置</button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleQuickAnalyze}
+                  disabled={!meal.desc.trim() || isAiProcessing}
+                >
+                  <Send size={18} className="mr-1" /> 一句话估算拳掌
+                </button>
+                <button type="button" className="secondary" onClick={genPlan}>
+                  <Sparkles size={18} className="mr-1" /> 生成下一餐建议
+                </button>
+                <button type="button" onClick={() => setShowPlanChooser(true)}>
+                  套用默认拳掌法
+                </button>
+                <button type="button" onClick={resetAll}>
+                  重置
+                </button>
+              </div>
+              <div className="muted">
+                <div>把描述自动换算成拳掌份量（蛋白/碳水/油脂/蔬菜）。</div>
+                <div>不估算也能生成建议（可先手动微调拳掌）。</div>
+                {inputMode === "manual" ? (
+                  <button type="button" className="link-button" onClick={() => goToInput("photo")}>
+                    切换到拍照记录
+                  </button>
+                ) : null}
               </div>
 
               {showPlanChooser && (
@@ -1401,7 +1422,7 @@ export default function App() {
                 />
               </div>
               <div className="actions">
-                <button className="primary" onClick={genPlan}><Sparkles size={18} className="mr-1" /> 生成策略</button>
+                <button className="primary" onClick={genPlan}><Sparkles size={18} className="mr-1" /> 生成下一餐建议</button>
                 <button onClick={closeEditMode}><ChevronRight className="rotate-180 mr-1" size={18} /> 返回</button>
               </div>
             </section>
@@ -1416,7 +1437,7 @@ export default function App() {
                 <h2>规划建议</h2>
               </div>
               {!result ? (
-                <div className="muted">先在“饮食输入”里生成策略。</div>
+                <div className="muted">先在“饮食输入”里生成下一餐建议。</div>
               ) : (
                 <>
                   <div className="output">
