@@ -15,8 +15,7 @@ import {
   Sparkles,
   Upload,
   User,
-  Wheat,
-  X,
+  Wheat
 } from "lucide-react";
 import "./App.css";
 
@@ -265,8 +264,6 @@ export default function App() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showToast, setShowToast] = useState(false);
-  const [planMode, setPlanMode] = useState("whtr");
-  const [showPlanChooser, setShowPlanChooser] = useState(false);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [coachAdvice, setCoachAdvice] = useState("");
   const [result, setResult] = useState(null);
@@ -278,6 +275,8 @@ export default function App() {
   const avatarInputRef = useRef(null);
   const importInputRef = useRef(null);
   const descInputRef = useRef(null);
+  const skipHistoryPushRef = useRef(false);
+  const hasHistoryInitRef = useRef(false);
 
   const [backupStatus, setBackupStatus] = useState("");
 
@@ -320,6 +319,30 @@ export default function App() {
     const timer = setTimeout(() => setShowToast(false), 2500);
     return () => clearTimeout(timer);
   }, [showToast]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (skipHistoryPushRef.current) {
+      skipHistoryPushRef.current = false;
+      return;
+    }
+    if (!hasHistoryInitRef.current) {
+      window.history.replaceState({ tab: activeTab }, "");
+      hasHistoryInitRef.current = true;
+      return;
+    }
+    window.history.pushState({ tab: activeTab }, "");
+  }, [activeTab]);
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handlePop = (event) => {
+      skipHistoryPushRef.current = true;
+      setIsEditMode(false);
+      setShowPreview(false);
+      setActiveTab(event.state?.tab || "home");
+    };
+    window.addEventListener("popstate", handlePop);
+    return () => window.removeEventListener("popstate", handlePop);
+  }, []);
 
   useEffect(() => {
     if (carbTouched) return;
@@ -420,7 +443,7 @@ export default function App() {
     });
   }
 
-  function applyDefaultHandMap(nextMealTime, mode = planMode) {
+  function applyDefaultHandMap(nextMealTime, mode = "whtr") {
     const goal = (profile.goal || "维持").trim();
     const mealTime = (nextMealTime || meal.mealTime || "午餐").trim();
     const goalMap = DEFAULT_HAND_MAP[goal] || DEFAULT_HAND_MAP["维持"];
@@ -547,11 +570,6 @@ export default function App() {
     return sideResult || topResult;
   }
 
-  function handlePlanChoice(mode) {
-    setPlanMode(mode);
-    applyDefaultHandMap(meal.mealTime, mode);
-    setShowPlanChooser(false);
-  }
 
   async function handlePhotoChange(event, type) {
     const file = event.target.files?.[0];
@@ -1314,22 +1332,23 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="actions">
+              <div className="action-grid">
                 <button
                   type="button"
-                  className="primary"
+                  className="action-button action-button--primary"
                   onClick={handleQuickAnalyze}
                   disabled={!meal.desc.trim() || isAiProcessing}
                 >
                   <Send size={18} className="mr-1" /> 一句话估算拳掌
                 </button>
-                <button type="button" className="secondary" onClick={genPlan}>
+                <button
+                  type="button"
+                  className="action-button action-button--secondary"
+                  onClick={genPlan}
+                >
                   <Sparkles size={18} className="mr-1" /> 生成下一餐建议
                 </button>
-                <button type="button" onClick={() => setShowPlanChooser(true)}>
-                  套用默认拳掌法
-                </button>
-                <button type="button" onClick={resetAll}>
+                <button type="button" className="action-button" onClick={resetAll}>
                   重置
                 </button>
               </div>
@@ -1343,26 +1362,6 @@ export default function App() {
                 ) : null}
               </div>
 
-              {showPlanChooser && (
-                <div className="plan-chooser-overlay" onClick={() => setShowPlanChooser(false)}>
-                  <div className="plan-chooser-sheet" onClick={(event) => event.stopPropagation()}>
-                    <div className="plan-chooser-header">
-                      <span>选择拳掌法估算方式</span>
-                      <button className="icon-btn-back" onClick={() => setShowPlanChooser(false)}>
-                        <X size={20} />
-                      </button>
-                    </div>
-                    <button className="plan-option recommended center" onClick={() => handlePlanChoice("whtr")}>
-                      <div className="plan-option-title">更准确（推荐）</div>
-                      <div className="plan-option-desc">基于腰围 + 身高估算，更贴近体脂分析</div>
-                    </button>
-                    <button className="plan-option center" onClick={() => handlePlanChoice("basic")}>
-                      <div className="plan-option-title">基础估算</div>
-                      <div className="plan-option-desc">基于身高、体重、年龄与训练日快速生成</div>
-                    </button>
-                  </div>
-                </div>
-              )}
             </section>
           )}
 
