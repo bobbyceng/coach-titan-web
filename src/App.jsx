@@ -265,6 +265,8 @@ export default function App() {
   const [showPreview, setShowPreview] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [photoEstimateStatus, setPhotoEstimateStatus] = useState("idle");
+  const [showPhotoTuning, setShowPhotoTuning] = useState(false);
   const [coachAdvice, setCoachAdvice] = useState("");
   const [result, setResult] = useState(null);
 
@@ -365,6 +367,7 @@ export default function App() {
   }, [photoSide.url]);
 
   const est = useMemo(() => estimateMealByHand(meal), [meal]);
+  const showTuningPanel = inputMode === "manual" || showPhotoTuning;
 
   const todayKey = getDateKey(new Date());
   const todayMeals = useMemo(
@@ -589,24 +592,25 @@ export default function App() {
       base64,
     };
 
-    const nextFront = type === "front" ? nextPhoto : photoFront;
-    const nextSide = type === "side" ? nextPhoto : photoSide;
-
     if (type === "front") {
       setPhotoFront(nextPhoto);
     } else {
       setPhotoSide(nextPhoto);
     }
 
-    if (!nextFront.base64 || !nextSide.base64) {
-      return;
-    }
+    setPhotoEstimateStatus("idle");
+    setShowPhotoTuning(false);
+    setShowPreview(false);
+  }
 
+  async function handlePhotoEstimate() {
+    if (!photoFront.base64 || !photoSide.base64) return;
     setIsAiProcessing(true);
+    setPhotoEstimateStatus("loading");
     try {
       const result = await analyzeWithTwoPhotos({
-        frontBase64: nextFront.base64,
-        sideBase64: nextSide.base64,
+        frontBase64: photoFront.base64,
+        sideBase64: photoSide.base64,
       });
       if (result) {
         setMealSafe({
@@ -617,10 +621,11 @@ export default function App() {
           vegFists: Number(result.vegFists) || meal.vegFists,
         });
       }
+      setPhotoEstimateStatus("done");
       setShowPreview(true);
     } catch (error) {
       console.error(error);
-      setShowPreview(true);
+      setPhotoEstimateStatus("error");
     } finally {
       setIsAiProcessing(false);
     }
@@ -1227,10 +1232,37 @@ export default function App() {
                       已选择：{photoFront.name || "未选俯拍"} / {photoSide.name || "未选侧面"}
                     </div>
                   )}
+                  <div className="photo-actions">
+                    <button
+                      type="button"
+                      className="action-button action-button--primary"
+                      onClick={handlePhotoEstimate}
+                      disabled={!photoFront.base64 || !photoSide.base64 || isAiProcessing}
+                    >
+                      {isAiProcessing ? "估算中..." : "AI 估算份量"}
+                    </button>
+                  </div>
+                  {photoEstimateStatus === "done" ? (
+                    <div className="muted">
+                      <div>估算完成，已填入拳掌。</div>
+                      <div>
+                        当前估算：蛋白 {formatAmount(meal.proteinPalms)} 掌 · 碳水 {formatAmount(meal.carbCuppedHands)} 拳 · 油脂 {formatAmount(meal.fatThumbs)} 指 · 蔬菜 {formatAmount(meal.vegFists)} 拳
+                      </div>
+                    </div>
+                  ) : null}
+                  {photoEstimateStatus === "error" ? (
+                    <div className="muted">估算失败，可改用手动输入或微调。</div>
+                  ) : null}
+                  {photoEstimateStatus !== "idle" && !showPhotoTuning ? (
+                    <button type="button" className="link-button" onClick={() => setShowPhotoTuning(true)}>
+                      需要微调
+                    </button>
+                  ) : null}
                 </div>
               )}
 
               <div className="formRow twoCol">
+
                 <div>
                   <label>餐次</label>
                   <select
@@ -1273,64 +1305,68 @@ export default function App() {
                 />
               </div>
 
-              <div className="sliders">
-                <Slider
-                  label="蛋白质"
-                  unit="掌"
-                  Icon={Beef}
-                  color="#22c55e"
-                  value={meal.proteinPalms}
-                  onChange={(v) => setMealSafe({ proteinPalms: v })}
-                  min={0}
-                  max={8}
-                  step={0.5}
-                />
-                <Slider
-                  label="碳水"
-                  unit="拳"
-                  Icon={Wheat}
-                  color="#fde68a"
-                  value={meal.carbCuppedHands}
-                  onChange={(v) => {
-                    setCarbTouched(true);
-                    setMealSafe({ carbCuppedHands: v });
-                  }}
-                  min={0}
-                  max={8}
-                  step={0.5}
-                />
-                <Slider
-                  label="油脂"
-                  unit="指"
-                  Icon={Droplet}
-                  color="#f97316"
-                  value={meal.fatThumbs}
-                  onChange={(v) => setMealSafe({ fatThumbs: v })}
-                  min={0}
-                  max={8}
-                  step={0.5}
-                />
-                <Slider
-                  label="蔬菜"
-                  unit="拳"
-                  Icon={Leaf}
-                  color="#16a34a"
-                  value={meal.vegFists}
-                  onChange={(v) => setMealSafe({ vegFists: v })}
-                  min={0}
-                  max={8}
-                  step={0.5}
-                />
-              </div>
+              {showTuningPanel ? (
+                <>
+                  <div className="sliders">
+                    <Slider
+                      label="蛋白质"
+                      unit="掌"
+                      Icon={Beef}
+                      color="#22c55e"
+                      value={meal.proteinPalms}
+                      onChange={(v) => setMealSafe({ proteinPalms: v })}
+                      min={0}
+                      max={8}
+                      step={0.5}
+                    />
+                    <Slider
+                      label="碳水"
+                      unit="拳"
+                      Icon={Wheat}
+                      color="#fde68a"
+                      value={meal.carbCuppedHands}
+                      onChange={(v) => {
+                        setCarbTouched(true);
+                        setMealSafe({ carbCuppedHands: v });
+                      }}
+                      min={0}
+                      max={8}
+                      step={0.5}
+                    />
+                    <Slider
+                      label="油脂"
+                      unit="指"
+                      Icon={Droplet}
+                      color="#f97316"
+                      value={meal.fatThumbs}
+                      onChange={(v) => setMealSafe({ fatThumbs: v })}
+                      min={0}
+                      max={8}
+                      step={0.5}
+                    />
+                    <Slider
+                      label="蔬菜"
+                      unit="拳"
+                      Icon={Leaf}
+                      color="#16a34a"
+                      value={meal.vegFists}
+                      onChange={(v) => setMealSafe({ vegFists: v })}
+                      min={0}
+                      max={8}
+                      step={0.5}
+                    />
+                  </div>
 
-              <div className="estBox">
-                <div className="estLine">
-                  <span>实时估算</span>
-                  <span>
-                    {est.kcal} kcal ｜ P {est.protein_g}g / C {est.carbs_g}g / F {est.fat_g}g
-                  </span>
-                </div>
-              </div>
+                  <div className="estBox">
+                    <div className="estLine">
+                      <span>实时估算</span>
+                      <span>
+                        {est.kcal} kcal ｜ P {est.protein_g}g / C {est.carbs_g}g / F {est.fat_g}g
+                      </span>
+                    </div>
+                  </div>
+                </>
+              ) : null}
 
               <div className="action-grid">
                 <button
