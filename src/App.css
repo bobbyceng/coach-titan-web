@@ -312,6 +312,22 @@ input[type="range"]::-webkit-slider-thumb {
   max-width: calc(600px - 32px);
   margin: 0 auto;
 }
+
+.muted {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.link-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 8px;
+}
 @keyframes slideUp {
   from { transform: translateY(100%); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
