@@ -511,10 +511,30 @@ export default function App() {
     setCarbTouched(false);
   }
 
-  function readImageBase64(file) {
+  function compressImage(file, maxSize = 1280, quality = 0.7) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result?.toString().split(",")[1] || "");
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const ratio = Math.min(1, maxSize / Math.max(img.width, img.height));
+          const width = Math.round(img.width * ratio);
+          const height = Math.round(img.height * ratio);
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            reject(new Error("图片压缩失败"));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL("image/jpeg", quality);
+          resolve(dataUrl.split(",")[1] || "");
+        };
+        img.onerror = () => reject(new Error("图片读取失败"));
+        img.src = reader.result?.toString() || "";
+      };
       reader.onerror = () => reject(new Error("图片读取失败"));
       reader.readAsDataURL(file);
     });
@@ -557,11 +577,13 @@ export default function App() {
   async function analyzeWithTwoPhotos({ frontBase64, sideBase64 }) {
     const topPrompt =
       "这是俯拍图，旁边可能有参照物（如手掌、餐具或手机）。请识别食物并按拳掌法估算，返回JSON：{\"desc\":\"餐食名称\",\"proteinPalms\":1,\"carbCuppedHands\":1,\"fatThumbs\":1,\"vegFists\":1}。只返回JSON。";
-    const topData = await analyzeWithVision({ prompt: topPrompt, imageBase64: frontBase64 });
+    const topData = frontBase64
+      ? await analyzeWithVision({ prompt: topPrompt, imageBase64: frontBase64 })
+      : await analyzeWithVision({ prompt: topPrompt, imageBase64: sideBase64 });
     const topText = extractResponseText(topData);
     const topResult = parseVisionResult(topText);
 
-    if (!sideBase64) return topResult;
+    if (!sideBase64 || !frontBase64) return topResult;
 
     const basePayload = topResult ? JSON.stringify(topResult) : "{}";
     const sidePrompt =
@@ -580,7 +602,7 @@ export default function App() {
 
     let base64 = "";
     try {
-      base64 = await readImageBase64(file);
+      base64 = await compressImage(file);
     } catch (error) {
       console.error(error);
       return;
@@ -604,7 +626,7 @@ export default function App() {
   }
 
   async function handlePhotoEstimate() {
-    if (!photoFront.base64 || !photoSide.base64) return;
+    if (!photoFront.base64 && !photoSide.base64) return;
     setIsAiProcessing(true);
     setPhotoEstimateStatus("loading");
     try {
@@ -1188,8 +1210,9 @@ export default function App() {
                       <CreditCard size={16} />
                       <span>拍照估算</span>
                     </div>
-                    <div className="photo-instruction-sub">参照物可选：手掌 / 手机 / 餐具，帮助估算更准</div>
-                    <div className="photo-instruction-sub">没有参照物也可以继续记录</div>
+                  <div className="photo-instruction-sub">参照物可选：手掌 / 手机 / 餐具，帮助估算更准</div>
+                  <div className="photo-instruction-sub">可只拍一张图直接估算，双角度更准</div>
+
                     <div className="photo-instruction-note">光线、距离、倾斜会影响识图，尽量明亮、平拍、靠近食物</div>
                   </div>
                   <div className="photo-grid">
@@ -1233,14 +1256,15 @@ export default function App() {
                     </div>
                   )}
                   <div className="photo-actions">
-                    <button
-                      type="button"
-                      className="action-button action-button--primary"
-                      onClick={handlePhotoEstimate}
-                      disabled={!photoFront.base64 || !photoSide.base64 || isAiProcessing}
-                    >
-                      {isAiProcessing ? "估算中..." : "AI 估算份量"}
-                    </button>
+                  <button
+                    type="button"
+                    className="action-button action-button--primary"
+                    onClick={handlePhotoEstimate}
+                    disabled={(!photoFront.base64 && !photoSide.base64) || isAiProcessing}
+                  >
+                    {isAiProcessing ? "估算中..." : "AI 估算份量"}
+                  </button>
+
                   </div>
                   {photoEstimateStatus === "done" ? (
                     <div className="muted">
