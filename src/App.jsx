@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   Beef,
   Camera,
@@ -18,11 +18,14 @@ import {
   Wheat
 } from "lucide-react";
 import "./App.css";
+import { estimateMealByHand } from "./utils/nutrition";
 
 const APP_TITLE = "Coach Titan";
 const DISCLAIMER =
   "免责声明：本工具基于常见营养学估算方法（拳掌法 + 基础代谢估算）仅供参考，不构成医疗/营养/训练处方。存在疾病、受伤、孕期或进食障碍风险请咨询医生或注册营养师。";
 const SCHEMA_VERSION = 1;
+const VISION_API_URL = import.meta.env.VITE_VISION_API_URL || "/api/vision";
+const VISION_TIMEOUT_MS = 20000;
 
 const TONES = [
   { key: "pro", label: "理性" },
@@ -154,22 +157,6 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-function estimateMealByHand({
-  proteinPalms = 1,
-  carbCuppedHands = 1,
-  fatThumbs = 1,
-  vegFists = 1,
-}) {
-  const protein_g = proteinPalms * 25;
-  const carbs_g = carbCuppedHands * 20;
-  const fat_g = fatThumbs * 5;
-  const kcal =
-    proteinPalms * 150 +
-    carbCuppedHands * 80 +
-    fatThumbs * 45 +
-    vegFists * 25;
-  return { protein_g, carbs_g, fat_g, kcal };
-}
 
 function toneWrap(toneKey, text) {
   if (toneKey === "strict") {
@@ -211,13 +198,15 @@ function formatAmount(value) {
 
 function normalizeHistoryEntry(entry) {
   const safe = entry && typeof entry === "object" ? entry : {};
+  const createdAt = safe.createdAt || "";
   const timestamp = safe.timestamp || new Date().toLocaleString();
-  const dateKey = safe.dateKey || getDateKey(timestamp);
+  const dateKey = safe.dateKey || (createdAt ? getDateKey(createdAt) : "");
 
   return {
     ...safe,
     id: safe.id || makeId(),
     schemaVersion: safe.schemaVersion || SCHEMA_VERSION,
+    createdAt,
     timestamp,
     dateKey,
     mealTime: safe.mealTime || "午餐",
@@ -252,7 +241,11 @@ function loadLS(key, fallback) {
 }
 
 function saveLS(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.error(`[Coach Titan] Failed to save ${key} to localStorage:`, error);
+  }
 }
 
 export default function App() {
@@ -265,6 +258,7 @@ export default function App() {
   const [showPreview, setShowPreview] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
+  const [aiError, setAiError] = useState("");
   const [photoEstimateStatus, setPhotoEstimateStatus] = useState("idle");
   const [showPhotoTuning, setShowPhotoTuning] = useState(false);
   const [coachAdvice, setCoachAdvice] = useState("");
@@ -400,7 +394,7 @@ export default function App() {
     cutoff.setHours(0, 0, 0, 0);
     cutoff.setDate(cutoff.getDate() - 6);
     return history.filter((item) => {
-      const date = parseDateKeyToDate(item.dateKey) || new Date(item.timestamp);
+    const date = parseDateKeyToDate(item.dateKey) || (item.createdAt ? new Date(item.createdAt) : new Date(item.timestamp));
       if (Number.isNaN(date.getTime())) return false;
       return date >= cutoff;
     });
@@ -541,18 +535,38 @@ export default function App() {
   }
 
   async function analyzeWithVision({ prompt, imageBase64 }) {
-    const response = await fetch("https://coach-titan-web2.vercel.app/api/vision", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, imageBase64 }),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), VISION_TIMEOUT_MS);
 
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data?.error || "Vision request failed");
+    try {
+      const response = await fetch(VISION_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, imageBase64 }),
+        signal: controller.signal,
+      });
+
+      const rawText = await response.text();
+      let data = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        data = { error: rawText || "Invalid response" };
+      }
+
+      if (!response.ok) {
+        throw new Error(data?.detail?.error?.message || data?.error || "Vision request failed");
+      }
+
+      return data?.data;
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw new Error("AI 请求超时，请检查网络后重试");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-
-    return data?.data;
   }
 
   function extractResponseText(payload) {
@@ -627,6 +641,7 @@ export default function App() {
 
   async function handlePhotoEstimate() {
     if (!photoFront.base64 && !photoSide.base64) return;
+    setAiError("");
     setIsAiProcessing(true);
     setPhotoEstimateStatus("loading");
     try {
@@ -647,6 +662,7 @@ export default function App() {
       setShowPreview(true);
     } catch (error) {
       console.error(error);
+      setAiError(error?.message || "AI 估算失败，请稍后重试");
       setPhotoEstimateStatus("error");
     } finally {
       setIsAiProcessing(false);
@@ -655,6 +671,7 @@ export default function App() {
 
   async function handleQuickAnalyze() {
     if (!meal.desc.trim()) return;
+    setAiError("");
     setIsAiProcessing(true);
     try {
       const prompt = `用户描述了一餐：${meal.desc}。按拳掌法估算并返回JSON：{"desc":"餐食名称","proteinPalms":1,"carbCuppedHands":1,"fatThumbs":1,"vegFists":1}。只返回JSON。`;
@@ -675,6 +692,7 @@ export default function App() {
       setShowPreview(true);
     } catch (error) {
       console.error(error);
+      setAiError(error?.message || "AI 估算失败，请稍后重试");
       setShowPreview(true);
     } finally {
       setIsAiProcessing(false);
@@ -692,21 +710,24 @@ export default function App() {
   }
 
   function buildBackupData() {
+    const { avatar: _avatar, ...profileWithoutAvatar } = profile;
     return {
-      schemaVersion: SCHEMA_VERSION,
+      version: SCHEMA_VERSION,
       exportedAt: new Date().toISOString(),
-      titan_profile: profile,
-      titan_tone: tone,
-      titan_is_training_today: isTrainingToday,
-      titan_history: history,
+      payload: {
+        profile: profileWithoutAvatar,
+        history,
+        tone,
+        isTrainingToday,
+      },
     };
   }
 
-  async function handleExportBackup() {
+  async function handleExportBackup(isAuto = false) {
     try {
       const data = buildBackupData();
       const json = JSON.stringify(data, null, 2);
-      const filename = `coach-titan-backup-${getDateKey(new Date())}.json`;
+      const filename = `coach-titan-backup-${isAuto ? "auto-" : ""}${getDateKey(new Date())}.json`;
 
       if (typeof window !== "undefined" && window.showSaveFilePicker) {
         const handle = await window.showSaveFilePicker({
@@ -730,10 +751,12 @@ export default function App() {
         link.click();
         URL.revokeObjectURL(url);
       }
-      setBackupStatus("备份已导出");
+      setBackupStatus(isAuto ? "自动备份已完成" : "备份已导出");
+      return true;
     } catch (error) {
       console.error(error);
-      setBackupStatus("导出失败，请重试");
+      setBackupStatus(isAuto ? "自动备份失败，请手动备份" : "导出失败，请重试");
+      return false;
     }
   }
 
@@ -752,18 +775,37 @@ export default function App() {
         setBackupStatus("备份文件格式不正确");
         return;
       }
-      if (data.schemaVersion && data.schemaVersion > SCHEMA_VERSION) {
-        setBackupStatus("备份版本较新，暂不支持导入");
+      if (data.version !== SCHEMA_VERSION) {
+        setBackupStatus(
+          data.version > SCHEMA_VERSION
+            ? "备份版本较新，暂不支持导入"
+            : "备份版本过旧，暂不支持导入"
+        );
+        return;
+      }
+      const { payload } = data;
+      if (!payload || typeof payload !== "object") {
+        setBackupStatus("备份文件缺少 payload");
         return;
       }
       const hasKeys =
-        data.titan_profile &&
-        data.titan_tone !== undefined &&
-        data.titan_is_training_today !== undefined &&
-        Array.isArray(data.titan_history);
+        payload.profile &&
+        payload.tone !== undefined &&
+        payload.isTrainingToday !== undefined &&
+        Array.isArray(payload.history);
       if (!hasKeys) {
         setBackupStatus("备份文件缺少必要字段");
         return;
+      }
+
+      // Auto-backup before import
+      const backupSuccess = await handleExportBackup(true);
+      if (!backupSuccess) {
+        const proceed = window.confirm("自动备份失败（可能被浏览器拦截）。导入将覆盖当前数据且无法撤销，是否仍要继续导入？");
+        if (!proceed) {
+          setBackupStatus("已取消导入（备份失败）");
+          return;
+        }
       }
 
       const confirmed = window.confirm("导入将覆盖当前数据，是否继续？");
@@ -772,11 +814,11 @@ export default function App() {
         return;
       }
 
-      const nextProfile = { ...DEFAULT_PROFILE, ...data.titan_profile };
+      const nextProfile = { ...DEFAULT_PROFILE, ...payload.profile, avatar: profile.avatar };
       setProfile(nextProfile);
-      setTone(data.titan_tone || "pro");
-      setIsTrainingToday(Boolean(data.titan_is_training_today));
-      setHistory(normalizeHistory(data.titan_history));
+      setTone(payload.tone || "pro");
+      setIsTrainingToday(Boolean(payload.isTrainingToday));
+      setHistory(normalizeHistory(payload.history));
       setResult(null);
       setShowPreview(false);
       setIsEditMode(false);
@@ -829,6 +871,7 @@ export default function App() {
     const newResult = normalizeHistoryEntry({
       id: makeId(),
       schemaVersion: SCHEMA_VERSION,
+      createdAt: now.toISOString(),
       timestamp: now.toLocaleString(),
       dateKey: getDateKey(now),
       summary: toneWrap(tone, summary),
@@ -931,6 +974,7 @@ export default function App() {
             <span>已存入 Titan 日志</span>
           </div>
         )}
+        {aiError ? <div className="ai-error">{aiError}</div> : null}
 
         <main className="content">
           {activeTab === "home" && !isEditMode && (
@@ -1631,7 +1675,7 @@ function NavButton({ label, Icon, id, activeTab, onSelect }) {
       onClick={() => onSelect(id)}
     >
       <div className={`p-1 rounded-full transition-all duration-200 ${isActive ? "bg-[#b7e4c7]" : ""}`}>
-        <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+        {createElement(Icon, { size: 24, strokeWidth: isActive ? 2.5 : 2 })}
       </div>
       <span className="text-[10px] font-medium">{label}</span>
     </button>
@@ -1646,7 +1690,7 @@ function Slider({ label, unit, Icon, color, value, onChange, min, max, step = 1 
       <div className="slider-head">
         <div className="slider-label">
           <span className="slider-icon" style={{ color }}>
-            <Icon size={18} />
+            {createElement(Icon, { size: 18 })}
           </span>
           <span className="slider-title">{label}</span>
         </div>

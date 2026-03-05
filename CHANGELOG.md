@@ -1,5 +1,29 @@
 # Coach Titan MVP 面试向更新日志
 
+## 2026-03-05
+- 目标：提高 AI 识别链路稳定性，并把 iOS 真机发布流程标准化。
+- 动作：Vision API 改为支持 `VITE_VISION_API_URL`（默认 `/api/vision`）；增加 20s 超时与 AbortController；完善响应解析容错与前端错误提示条（`aiError`）；新增发布脚本 `cap:sync` / `cap:open` / `ios`；更新 README 的 Xcode 真机部署步骤。
+- 验证：`npm run lint`、`npm test`、`npm run build`、`npm run cap:sync` 均通过。
+- 影响：弱网/接口异常下用户可感知、可恢复；iOS 发布路径从“会的人才会”变成可复制的标准流程。
+
+## 2026-02-25
+- 目标：提升数据安全性、可移植性与工程质量
+- 动作：统一备份 Schema v1 (`{version, exportedAt, payload}`)，导出剔除 `profile.avatar`；导入改为覆盖策略并增加 best-effort 自动备份；为 `saveLS` 增加 `try/catch`；引入 Vitest 并抽离 `estimateMealByHand` 至 `src/utils/nutrition.js` 进行单测；历史记录新增 `createdAt` (ISO) 字段。
+- 验证：`npm run test` 通过；导入导出 JSON 结构符合 v1 规范；模拟 `localStorage` 写入失败不崩溃；`avatar` 在导入时被正确保留。
+- 影响：增强了用户数据的安全感与跨设备迁移的可靠性；建立了自动化测试基建，降低后续重构风险。
+
+### GitHub Release Notes (v1.1.0)
+#### 🚀 Features & Improvements
+- **Data Security**: New Backup Schema v1 with auto-backup before import.
+- **Robustness**: Added `try/catch` to `localStorage` operations to prevent crashes on storage limits.
+- **Portability**: Standardized history timestamps using ISO 8601 (`createdAt`).
+- **Testing**: Integrated Vitest and added unit tests for core nutrition logic.
+
+#### 🛠 Technical Changes
+- Extracted `estimateMealByHand` to `src/utils/nutrition.js` for better testability.
+- Excluded `profile.avatar` from backups to optimize file size.
+- Updated import logic to use an overwrite strategy with user confirmation.
+
 ## 2026-02-03
 - 目标：明确拍照与手动入口的功能边界
 - 动作：引入输入模式（拍照/快速输入），手动模式隐藏拍照区并聚焦文本输入

@@ -1,16 +1,68 @@
-# React + Vite
+# Coach Titan Web (Capacitor iOS MVP)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+一个可快速部署到 iPhone 的饮食估算 MVP（React + Vite + Capacitor iOS）。
 
-Currently, two official plugins are available:
+## 本地开发
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```bash
+npm install
+npm run dev
+```
 
-## React Compiler
+## 质量检查
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+npm run lint
+npm test
+npm run build
+```
 
-## Expanding the ESLint configuration
+## 部署到 iPhone（Xcode）
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+0. 先做本机预检（强烈建议）：
+
+```bash
+npm run ios:preflight
+```
+
+如果提示 xcode-select 指向 CommandLineTools，请先执行：
+
+```bash
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+```
+
+1. 先构建并同步到 iOS 工程：
+
+```bash
+npm run cap:sync
+```
+
+2. 打开 Xcode：
+
+```bash
+npm run cap:open
+```
+
+3. 在 Xcode 中：
+- 选择 `App` target
+- `Signing & Capabilities` 里选择你的 Team
+- 连接 iPhone 或选择模拟器
+- 点击 Run（▶）
+
+> 一键命令：`npm run ios`
+
+## AI 接口配置
+
+前端默认请求 `"/api/vision"`。可用环境变量覆盖：
+
+```bash
+VITE_VISION_API_URL=https://your-domain.com/api/vision
+```
+
+在 `.env.local` 添加后重启开发服务。
+
+## 目录说明
+
+- `src/`：前端页面与逻辑
+- `api/vision.js`：Vercel Serverless 代理（转发到 ARK）
+- `ios/`：Capacitor iOS 工程
