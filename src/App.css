@@ -841,9 +841,77 @@ h1, h2, h3, .action-title {
   color: var(--text-muted);
 }
 
+/* Greeting line */
+.greeting-line {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.3px;
+}
+
+.greeting-today {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* Camera inline button inside input-group */
+.camera-inline-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  margin-left: 2px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.camera-inline-btn:active {
+  background: var(--separator);
+  color: var(--primary);
+}
+
 /* Quick Input Row */
 .quick-input-row {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
+}
+
+.quick-meal-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.quick-meal-tab {
+  flex: 1;
+  padding: 7px 0;
+  border-radius: 100px;
+  border: 1px solid var(--separator);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quick-meal-tab.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.quick-input-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 8px;
+  text-align: center;
 }
 
 .input-group {

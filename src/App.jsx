@@ -275,6 +275,10 @@ export default function App() {
   const hasHistoryInitRef = useRef(false);
 
   const [backupStatus, setBackupStatus] = useState("");
+  const [quickDesc, setQuickDesc] = useState("");
+  const [quickMealTime, setQuickMealTime] = useState("午餐");
+  const [quickSaveStatus, setQuickSaveStatus] = useState("idle");
+  const [toastMsg, setToastMsg] = useState("已存入 Titan 日志");
 
   const [carbTouched, setCarbTouched] = useState(false);
   const [meal, _setMeal] = useState({
@@ -891,6 +895,7 @@ export default function App() {
 
     setResult(newResult);
     setHistory((prev) => [newResult, ...prev]);
+    setToastMsg("已存入 Titan 日志");
     setShowToast(true);
     setActiveTab("advice");
   }
@@ -917,6 +922,103 @@ export default function App() {
     setActiveTab("home");
   }
 
+
+  async function handleQuickSave() {
+    const desc = quickDesc.trim();
+    if (!desc) return;
+
+    const now = new Date();
+    const goal = (profile.goal || "维持").trim();
+    const goalMap = DEFAULT_HAND_MAP[goal] || DEFAULT_HAND_MAP["维持"];
+    const preset = goalMap?.[quickMealTime] || goalMap?.["午餐"];
+    const defaultHands = {
+      proteinPalms: preset?.proteinPalms ?? 1,
+      carbCuppedHands: preset?.carbCuppedHands ?? 1,
+      fatThumbs: preset?.fatThumbs ?? 1,
+      vegFists: preset?.vegFists ?? 1,
+    };
+
+    const estResult = estimateMealByHand(defaultHands);
+    const dailyEstimate = estimateDailyCalories(profile);
+    const basePerMeal = dailyEstimate?.perMeal || (goal.includes("减脂") ? 500 : goal.includes("增肌") ? 650 : 550);
+    const highLine = basePerMeal * 1.15;
+    const lowLine = basePerMeal * 0.85;
+
+    let strategy = "";
+    if (goal.includes("减脂")) {
+      strategy = estResult.kcal > highLine
+        ? "这餐偏高。下一餐建议：蛋白 1-1.5 掌 + 蔬菜 2 拳，碳水减半（0-0.5 拳），油脂尽量少。"
+        : "这餐可控。下一餐建议：蛋白 1 掌 + 蔬菜 2 拳，碳水 0.5-1 拳（看你训练强度）。";
+    } else if (goal.includes("增肌")) {
+      strategy = estResult.kcal < lowLine
+        ? "这餐偏少。下一餐建议：蛋白 1.5-2 掌 + 碳水 1-2 拳 + 蔬菜 1-2 拳，别怕碳水。"
+        : "这餐不错。下一餐建议：蛋白 1.5 掌 + 碳水 1 拳 + 蔬菜 1-2 拳，油脂 1 拇指左右。";
+    } else {
+      strategy = "下一餐建议：蛋白 1 掌 + 蔬菜 2 拳 + 碳水 0.5-1 拳 + 油脂 1 拇指（按饥饿感微调）。";
+    }
+
+    const dailyNote = dailyEstimate ? `参考日目标约 ${dailyEstimate.target} kcal（约 ${dailyEstimate.perMeal} kcal/餐）` : "";
+    const summary = `估算结果：约 ${estResult.kcal} kcal（蛋白 ${estResult.protein_g}g / 碳水 ${estResult.carbs_g}g / 脂肪 ${estResult.fat_g}g）。${dailyNote ? ` ${dailyNote}` : ""}`;
+    const injuries = (profile.injuries || "").trim();
+    const safety = injuries
+      ? `伤病提示：你填写的是「${injuries}」。如疼痛加重或不明原因不适，建议先降强度并咨询专业人士。`
+      : "伤病提示：未填写。若有旧伤/疼痛史，建议补充。";
+
+    const entryId = makeId();
+    const entry = normalizeHistoryEntry({
+      id: entryId,
+      schemaVersion: SCHEMA_VERSION,
+      createdAt: now.toISOString(),
+      timestamp: now.toLocaleString(),
+      dateKey: getDateKey(now),
+      summary: toneWrap(tone, summary),
+      plan: toneWrap(tone, strategy),
+      safety,
+      disclaimer: DISCLAIMER,
+      mealTime: quickMealTime,
+      mealDesc: desc,
+      kcal: estResult.kcal,
+      ...defaultHands,
+      goal: profile.goal,
+    });
+
+    // 立刻存入历史，清空输入框
+    setHistory((prev) => [entry, ...prev]);
+    setQuickDesc("");
+    setQuickSaveStatus("ai");
+    setToastMsg("已记录，AI 估算中...");
+    setShowToast(true);
+
+    // 后台让 AI 更新份量
+    try {
+      const prompt = `用户描述了一餐：${desc}。按拳掌法估算并返回JSON：{"desc":"餐食名称","proteinPalms":1,"carbCuppedHands":1,"fatThumbs":1,"vegFists":1}。只返回JSON。`;
+      const data = await analyzeWithVision({ prompt });
+      const text = extractResponseText(data);
+      const aiResult = parseVisionResult(text);
+
+      if (aiResult) {
+        const aiHands = {
+          proteinPalms: Number(aiResult.proteinPalms) || defaultHands.proteinPalms,
+          carbCuppedHands: Number(aiResult.carbCuppedHands) || defaultHands.carbCuppedHands,
+          fatThumbs: Number(aiResult.fatThumbs) || defaultHands.fatThumbs,
+          vegFists: Number(aiResult.vegFists) || defaultHands.vegFists,
+        };
+        const aiEst = estimateMealByHand(aiHands);
+        const aiSummary = `估算结果：约 ${aiEst.kcal} kcal（蛋白 ${aiEst.protein_g}g / 碳水 ${aiEst.carbs_g}g / 脂肪 ${aiEst.fat_g}g）。${dailyNote ? ` ${dailyNote}` : ""}`;
+        setHistory((prev) =>
+          prev.map((item) =>
+            item.id === entryId
+              ? { ...item, ...aiHands, kcal: aiEst.kcal, mealDesc: aiResult.desc || desc, summary: toneWrap(tone, aiSummary) }
+              : item
+          )
+        );
+      }
+    } catch (error) {
+      console.error("[Quick Save] AI update failed:", error);
+    } finally {
+      setQuickSaveStatus("idle");
+    }
+  }
 
   function goToInput(mode = "auto") {
     setInputMode(mode);
@@ -971,7 +1073,7 @@ export default function App() {
         {showToast && (
           <div className="toast">
             <CheckCircle2 size={16} />
-            <span>已存入 Titan 日志</span>
+            <span>{toastMsg}</span>
           </div>
         )}
         {aiError ? <div className="ai-error">{aiError}</div> : null}
@@ -980,67 +1082,47 @@ export default function App() {
           {activeTab === "home" && !isEditMode && (
             <section className="home-container">
               <div className="home-header">
-                <h1 className="greeting-text">Coach Titan：<br />
-                  <span className="user-name">
-                    {(profile.name || "").trim() ? (
-                      `你好，${displayName}`
-                    ) : (
-                      <>你好，<span className="greeting-tip">请在档案页输入昵称</span></>
-                    )}
+                <div className="greeting-line">
+                  {(profile.name || "").trim() ? `你好，${displayName}` : "你好"}
+                  <span className="greeting-today">
+                    {todayTotals.mealCount > 0
+                      ? ` · 今日 ${todayTotals.mealCount} 餐 · ${formatAmount(todayTotals.kcal)} kcal`
+                      : " · 今天还没记录"}
                   </span>
-                </h1>
-              </div>
-
-              <div className="action-grid">
-                <button className="action-card primary" onClick={() => goToInput("photo")}>
-                  <div className="icon-circle big">
-                    <Camera size={36} strokeWidth={1.5} />
-                  </div>
-                  <div className="action-text">
-                    <span className="action-title">拍照记录</span>
-                    <span className="action-desc">双角度 · 参照物可选</span>
-                  </div>
-                </button>
-                <button className="action-card secondary" onClick={() => goToInput("manual")}>
-                  <div className="icon-circle">
-                    <PenLine size={28} strokeWidth={1.5} />
-                  </div>
-                  <div className="action-text">
-                    <span className="action-title">快速输入</span>
-                    <span className="action-desc">一句话生成建议</span>
-                  </div>
-                </button>
-
-              </div>
-
-              <div className="quick-input-row">
-                <div className="input-group">
-                  <input
-                    value={meal.desc}
-                    onChange={(e) => setMealSafe({ desc: e.target.value })}
-                    placeholder="或者直接告诉我吃了什么..."
-                    className="clean-input"
-                  />
-                  <button className="send-icon-btn" onClick={handleQuickAnalyze} disabled={isAiProcessing}>
-                    <Send size={20} />
-                  </button>
                 </div>
               </div>
 
-              <div className="home-card">
-                <div className="home-title">今日概览</div>
-                {todayTotals.mealCount === 0 ? (
-                  <div className="historyMeta">今天还没记录，先记录一餐。</div>
-                ) : (
-                  <>
-                    <div className="historyMeta">
-                      已记录 {todayTotals.mealCount} 餐 · 约 {formatAmount(todayTotals.kcal)} kcal
-                    </div>
-                    <div className="historyMeta">
-                      蛋白 {formatAmount(todayTotals.protein)} 掌 · 碳水 {formatAmount(todayTotals.carb)} 拳 · 油脂 {formatAmount(todayTotals.fat)} 指 · 蔬菜 {formatAmount(todayTotals.veg)} 拳
-                    </div>
-                  </>
-                )}
+              <div className="quick-input-row">
+                <div className="quick-meal-tabs">
+                  {["早餐", "午餐", "晚餐", "加餐"].map((t) => (
+                    <button
+                      key={t}
+                      className={`quick-meal-tab${quickMealTime === t ? " active" : ""}`}
+                      onClick={() => setQuickMealTime(t)}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                <div className="input-group">
+                  <button className="camera-inline-btn" onClick={() => goToInput("photo")} title="拍照记录">
+                    <Camera size={20} strokeWidth={1.5} />
+                  </button>
+                  <input
+                    value={quickDesc}
+                    onChange={(e) => setQuickDesc(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && quickDesc.trim() && quickSaveStatus !== "ai" && handleQuickSave()}
+                    placeholder="一句话记录这餐..."
+                    className="clean-input"
+                  />
+                  <button
+                    className="send-icon-btn"
+                    onClick={handleQuickSave}
+                    disabled={!quickDesc.trim() || quickSaveStatus === "ai"}
+                  >
+                    {quickSaveStatus === "ai" ? <Sparkles size={20} /> : <Send size={20} />}
+                  </button>
+                </div>
               </div>
 
               {history.length > 0 && (

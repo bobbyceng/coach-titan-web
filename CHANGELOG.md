@@ -1,5 +1,15 @@
 # Coach Titan MVP 面试向更新日志
 
+## 2026-03-13
+- 目标：降低记录门槛，首页一句话即可完成记录
+- 动作：
+  - 新增「极速记录」路径：首页输入一句话描述 → 立刻保存（使用目标对应的默认拳掌值）→ AI 在后台悄悄更新份量，不阻塞用户
+  - 重构首页布局：移除两个大操作卡片（拍照记录 / 快速输入）与独立今日概览卡；改为单行问候 + 今日统计；统一输入栏内嵌相机图标、文字输入和发送按钮；餐次选择改为紧凑 Tab（早餐/午餐/晚餐/加餐）
+  - 修复 iOS 部署 PATH 问题：`package.json` 中 `vite`/`cap` 命令改用 `./node_modules/.bin/` 绝对路径，解决 `sh: vite: command not found` 与 `sh: cap: command not found`
+  - 新增 `CLAUDE.md`：为项目建立持久开发上下文，记录架构决策、设计规范和核心产品约束
+- 验证：`npm run build` 通过；`npm run ios` 链路全程可执行
+- 影响：首页交互区从 6+ 个点击区收缩到 3 个；最常见的记录场景从 6 步缩短到 2 步（输入 → 回车）
+
 ## 2026-03-05
 - 目标：提高 AI 识别链路稳定性，并把 iOS 真机发布流程标准化。
 - 动作：Vision API 改为支持 `VITE_VISION_API_URL`（默认 `/api/vision`）；增加 20s 超时与 AbortController；完善响应解析容错与前端错误提示条（`aiError`）；新增发布脚本 `cap:sync` / `cap:open` / `ios`；更新 README 的 Xcode 真机部署步骤。

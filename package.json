@@ -4,14 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "./node_modules/.bin/vite",
+    "build": "./node_modules/.bin/vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
     "ios:preflight": "bash ./scripts/ios-preflight.sh",
-    "cap:sync": "npm run build && npx cap sync ios",
-    "cap:open": "npx cap open ios",
+    "cap:sync": "npm run build && ./node_modules/.bin/cap sync ios",
+    "cap:open": "./node_modules/.bin/cap open ios",
     "ios": "npm run ios:preflight && npm run cap:sync && npm run cap:open",
     "postinstall": "patch-package"
   },
