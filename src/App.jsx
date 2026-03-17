@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CreditCard,
   Droplet,
   History,
   Leaf,
@@ -260,7 +259,8 @@ export default function App() {
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [aiError, setAiError] = useState("");
   const [photoEstimateStatus, setPhotoEstimateStatus] = useState("idle");
-  const [showPhotoTuning, setShowPhotoTuning] = useState(false);
+  const [showPhotoResult, setShowPhotoResult] = useState(false);
+  const [showAdjustPanel, setShowAdjustPanel] = useState(false);
   const [coachAdvice, setCoachAdvice] = useState("");
   const [result, setResult] = useState(null);
 
@@ -365,7 +365,7 @@ export default function App() {
   }, [photoSide.url]);
 
   const est = useMemo(() => estimateMealByHand(meal), [meal]);
-  const showTuningPanel = inputMode === "manual" || showPhotoTuning;
+  const showTuningPanel = inputMode === "manual";
 
   const todayKey = getDateKey(new Date());
   const todayMeals = useMemo(
@@ -639,7 +639,8 @@ export default function App() {
     }
 
     setPhotoEstimateStatus("idle");
-    setShowPhotoTuning(false);
+    setShowPhotoResult(false);
+    setShowAdjustPanel(false);
     setShowPreview(false);
   }
 
@@ -663,7 +664,8 @@ export default function App() {
         });
       }
       setPhotoEstimateStatus("done");
-      setShowPreview(true);
+      setShowPhotoResult(true);
+      setShowAdjustPanel(false);
     } catch (error) {
       console.error(error);
       setAiError(error?.message || "AI 估算失败，请稍后重试");
@@ -834,6 +836,20 @@ export default function App() {
     } finally {
       event.target.value = "";
     }
+  }
+
+  function getMealSignals(mealData, mealTime, goal) {
+    const rec = DEFAULT_HAND_MAP[goal]?.[mealTime] ?? DEFAULT_HAND_MAP["减脂"]["午餐"];
+    const check = (val, recVal) => {
+      if (val >= recVal * 0.6 && val <= recVal * 1.4) return "ok";
+      return val > recVal * 1.4 ? "high" : "low";
+    };
+    return {
+      protein: check(mealData.proteinPalms, rec.proteinPalms),
+      carb: check(mealData.carbCuppedHands, rec.carbCuppedHands),
+      fat: check(mealData.fatThumbs, rec.fatThumbs),
+      veg: check(mealData.vegFists, rec.vegFists),
+    };
   }
 
   function genPlan() {
@@ -1023,6 +1039,8 @@ export default function App() {
   function goToInput(mode = "auto") {
     setInputMode(mode);
     setShowPreview(false);
+    setShowPhotoResult(false);
+    setShowAdjustPanel(false);
     setIsEditMode(false);
     setActiveTab("input");
     if (mode === "manual") {
@@ -1329,25 +1347,55 @@ export default function App() {
                 </button>
                 <h2>{inputMode === "photo" ? "拍照记录" : "快速输入"}</h2>
               </div>
-              {inputMode !== "manual" && (
-                <div className="photo-upload-box">
-                  <div className="photo-instruction">
-                    <div className="photo-instruction-title">
-                      <CreditCard size={16} />
-                      <span>拍照估算</span>
-                    </div>
-                  <div className="photo-instruction-sub">参照物可选：手掌 / 手机 / 餐具，帮助估算更准</div>
-                  <div className="photo-instruction-sub">可只拍一张图直接估算，双角度更准</div>
 
-                    <div className="photo-instruction-note">光线、距离、倾斜会影响识图，尽量明亮、平拍、靠近食物</div>
+              {/* ── 拍照模式：阶段一（上传表单） ── */}
+              {inputMode !== "manual" && !showPhotoResult && (
+                <>
+                  {/* 餐次 Tabs */}
+                  <div className="quick-meal-tabs" style={{ marginBottom: "12px" }}>
+                    {["早餐", "午餐", "晚餐", "加餐"].map((t) => (
+                      <button
+                        key={t}
+                        className={`quick-meal-tab${meal.mealTime === t ? " active" : ""}`}
+                        onClick={() => {
+                          setCarbTouched(false);
+                          setMealSafe({ mealTime: t });
+                          applyDefaultHandMap(t);
+                        }}
+                      >
+                        {t}
+                      </button>
+                    ))}
                   </div>
-                  <div className="photo-grid">
+
+                  {/* 训练切换 */}
+                  <div className="formRow twoCol" style={{ marginBottom: "12px" }}>
+                    <label style={{ alignSelf: "center", fontWeight: 500 }}>今日训练</label>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        type="button"
+                        className={`quick-meal-tab${isTrainingToday ? " active" : ""}`}
+                        onClick={() => { setCarbTouched(false); setIsTrainingToday(true); }}
+                      >
+                        是
+                      </button>
+                      <button
+                        type="button"
+                        className={`quick-meal-tab${!isTrainingToday ? " active" : ""}`}
+                        onClick={() => { setCarbTouched(false); setIsTrainingToday(false); }}
+                      >
+                        否
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 上传区 */}
+                  <div className="photo-upload-box">
                     <input
                       ref={frontInputRef}
                       type="file"
                       accept="image/*"
                       onChange={(event) => handlePhotoChange(event, "front")}
-                      className="hidden"
                       style={{ display: "none" }}
                     />
                     <input
@@ -1355,198 +1403,179 @@ export default function App() {
                       type="file"
                       accept="image/*"
                       onChange={(event) => handlePhotoChange(event, "side")}
-                      className="hidden"
                       style={{ display: "none" }}
                     />
-                    <button type="button" className="photo-slot" onClick={() => frontInputRef.current?.click()}>
-                      {photoFront.url ? (
-                        <img src={photoFront.url} alt="front" className="photo-thumb" />
-                      ) : (
-                        <Camera size={20} />
-                      )}
-                      <span>{photoFront.name ? "更换俯拍" : "上传俯拍"}</span>
-                    </button>
-                    <button type="button" className="photo-slot" onClick={() => sideInputRef.current?.click()}>
-                      {photoSide.url ? (
-                        <img src={photoSide.url} alt="side" className="photo-thumb" />
-                      ) : (
-                        <Camera size={20} />
-                      )}
-                      <span>{photoSide.name ? "更换侧面" : "上传侧面"}</span>
-                    </button>
-                  </div>
-                  <div className="photo-privacy">为方便测量，不会存入数据库</div>
-                  {(photoFront.name || photoSide.name) && (
-                    <div className="photo-filenames">
-                      已选择：{photoFront.name || "未选俯拍"} / {photoSide.name || "未选侧面"}
+                    <div className="photo-grid">
+                      <button type="button" className="photo-slot" onClick={() => frontInputRef.current?.click()}>
+                        {photoFront.url ? (
+                          <img src={photoFront.url} alt="front" className="photo-thumb" />
+                        ) : (
+                          <Camera size={20} />
+                        )}
+                        <span>{photoFront.name ? "更换俯拍" : "📷 俯拍"}</span>
+                      </button>
+                      <button type="button" className="photo-slot" onClick={() => sideInputRef.current?.click()}>
+                        {photoSide.url ? (
+                          <img src={photoSide.url} alt="side" className="photo-thumb" />
+                        ) : (
+                          <Camera size={20} />
+                        )}
+                        <span>{photoSide.name ? "更换侧面" : "📷 侧面（可选）"}</span>
+                      </button>
                     </div>
-                  )}
-                  <div className="photo-actions">
+                    <div className="photo-privacy">照片仅用于本次识别，不会存储</div>
+                  </div>
+
+                  {/* 描述输入 */}
+                  <div className="formRow" style={{ marginTop: "12px" }}>
+                    <input
+                      ref={descInputRef}
+                      value={meal.desc}
+                      onChange={(e) => setMealSafe({ desc: e.target.value })}
+                      placeholder="餐食描述（可选，例如：牛肉饭 + 青菜）"
+                    />
+                  </div>
+
+                  {/* 主 CTA */}
                   <button
                     type="button"
                     className="action-button action-button--primary"
+                    style={{ width: "100%", marginTop: "16px" }}
                     onClick={handlePhotoEstimate}
                     disabled={(!photoFront.base64 && !photoSide.base64) || isAiProcessing}
                   >
-                    {isAiProcessing ? "估算中..." : "AI 估算份量"}
+                    {isAiProcessing ? "识别中..." : "开始 AI 识别"}
                   </button>
-
-                  </div>
-                  {photoEstimateStatus === "done" ? (
-                    <div className="muted">
-                      <div>估算完成，已填入拳掌。</div>
-                      <div>
-                        当前估算：蛋白 {formatAmount(meal.proteinPalms)} 掌 · 碳水 {formatAmount(meal.carbCuppedHands)} 拳 · 油脂 {formatAmount(meal.fatThumbs)} 指 · 蔬菜 {formatAmount(meal.vegFists)} 拳
-                      </div>
+                  {photoEstimateStatus === "error" && (
+                    <div className="muted" style={{ marginTop: "8px", color: "#ef4444" }}>
+                      识别失败，请检查图片或网络后重试。
                     </div>
-                  ) : null}
-                  {photoEstimateStatus === "error" ? (
-                    <div className="muted">估算失败，可改用手动输入或微调。</div>
-                  ) : null}
-                  {photoEstimateStatus !== "idle" && !showPhotoTuning ? (
-                    <button type="button" className="link-button" onClick={() => setShowPhotoTuning(true)}>
-                      需要微调
-                    </button>
-                  ) : null}
-                </div>
+                  )}
+                </>
               )}
 
-              <div className="formRow twoCol">
-
-                <div>
-                  <label>餐次</label>
-                  <select
-                    value={meal.mealTime}
-                    onChange={(e) => {
-                      const next = e.target.value;
-                      setCarbTouched(false);
-                      setMealSafe({ mealTime: next });
-                      applyDefaultHandMap(next);
-                    }}
-                  >
-                    <option>早餐</option>
-                    <option>午餐</option>
-                    <option>晚餐</option>
-                    <option>加餐</option>
-                  </select>
-                </div>
-                <div>
-                  <label>今日训练</label>
-                  <select
-                    value={isTrainingToday ? "yes" : "no"}
-                    onChange={(e) => {
-                      setCarbTouched(false);
-                      setIsTrainingToday(e.target.value === "yes");
-                    }}
-                  >
-                    <option value="yes">是</option>
-                    <option value="no">否</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="formRow">
-                <label>餐食描述</label>
-                <input
-                  ref={descInputRef}
-                  value={meal.desc}
-                  onChange={(e) => setMealSafe({ desc: e.target.value })}
-                  placeholder="例如：牛肉饭 + 青菜"
+              {/* ── 拍照模式：阶段二（结果卡片） ── */}
+              {inputMode !== "manual" && showPhotoResult && (
+                <PhotoResultCard
+                  meal={meal}
+                  est={est}
+                  goal={profile.goal || "减脂"}
+                  showAdjustPanel={showAdjustPanel}
+                  setShowAdjustPanel={setShowAdjustPanel}
+                  setMealSafe={setMealSafe}
+                  setCarbTouched={setCarbTouched}
+                  getMealSignals={getMealSignals}
+                  genPlan={genPlan}
+                  onRetake={() => {
+                    setShowPhotoResult(false);
+                    setShowAdjustPanel(false);
+                    setPhotoEstimateStatus("idle");
+                  }}
                 />
-              </div>
+              )}
 
-              {showTuningPanel ? (
+              {/* ── 手动模式 ── */}
+              {inputMode === "manual" && (
                 <>
-                  <div className="sliders">
-                    <Slider
-                      label="蛋白质"
-                      unit="掌"
-                      Icon={Beef}
-                      color="#22c55e"
-                      value={meal.proteinPalms}
-                      onChange={(v) => setMealSafe({ proteinPalms: v })}
-                      min={0}
-                      max={8}
-                      step={0.5}
-                    />
-                    <Slider
-                      label="碳水"
-                      unit="拳"
-                      Icon={Wheat}
-                      color="#fde68a"
-                      value={meal.carbCuppedHands}
-                      onChange={(v) => {
-                        setCarbTouched(true);
-                        setMealSafe({ carbCuppedHands: v });
-                      }}
-                      min={0}
-                      max={8}
-                      step={0.5}
-                    />
-                    <Slider
-                      label="油脂"
-                      unit="指"
-                      Icon={Droplet}
-                      color="#f97316"
-                      value={meal.fatThumbs}
-                      onChange={(v) => setMealSafe({ fatThumbs: v })}
-                      min={0}
-                      max={8}
-                      step={0.5}
-                    />
-                    <Slider
-                      label="蔬菜"
-                      unit="拳"
-                      Icon={Leaf}
-                      color="#16a34a"
-                      value={meal.vegFists}
-                      onChange={(v) => setMealSafe({ vegFists: v })}
-                      min={0}
-                      max={8}
-                      step={0.5}
-                    />
-                  </div>
-
-                  <div className="estBox">
-                    <div className="estLine">
-                      <span>实时估算</span>
-                      <span>
-                        {est.kcal} kcal ｜ P {est.protein_g}g / C {est.carbs_g}g / F {est.fat_g}g
-                      </span>
+                  <div className="formRow twoCol">
+                    <div>
+                      <label>餐次</label>
+                      <select
+                        value={meal.mealTime}
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setCarbTouched(false);
+                          setMealSafe({ mealTime: next });
+                          applyDefaultHandMap(next);
+                        }}
+                      >
+                        <option>早餐</option>
+                        <option>午餐</option>
+                        <option>晚餐</option>
+                        <option>加餐</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>今日训练</label>
+                      <select
+                        value={isTrainingToday ? "yes" : "no"}
+                        onChange={(e) => {
+                          setCarbTouched(false);
+                          setIsTrainingToday(e.target.value === "yes");
+                        }}
+                      >
+                        <option value="yes">是</option>
+                        <option value="no">否</option>
+                      </select>
                     </div>
                   </div>
-                </>
-              ) : null}
 
-              <div className="action-grid">
-                <button
-                  type="button"
-                  className="action-button action-button--primary"
-                  onClick={handleQuickAnalyze}
-                  disabled={!meal.desc.trim() || isAiProcessing}
-                >
-                  <Send size={18} className="mr-1" /> 一句话估算拳掌
-                </button>
-                <button
-                  type="button"
-                  className="action-button action-button--secondary"
-                  onClick={genPlan}
-                >
-                  <Sparkles size={18} className="mr-1" /> 生成下一餐建议
-                </button>
-                <button type="button" className="action-button" onClick={resetAll}>
-                  重置
-                </button>
-              </div>
-              <div className="muted">
-                <div>把描述自动换算成拳掌份量（蛋白/碳水/油脂/蔬菜）。</div>
-                <div>不估算也能生成建议（可先手动微调拳掌）。</div>
-                {inputMode === "manual" ? (
-                  <button type="button" className="link-button" onClick={() => goToInput("photo")}>
-                    切换到拍照记录
-                  </button>
-                ) : null}
-              </div>
+                  <div className="formRow">
+                    <label>餐食描述</label>
+                    <input
+                      ref={descInputRef}
+                      value={meal.desc}
+                      onChange={(e) => setMealSafe({ desc: e.target.value })}
+                      placeholder="例如：牛肉饭 + 青菜"
+                    />
+                  </div>
+
+                  {showTuningPanel && (
+                    <>
+                      <div className="sliders">
+                        <Slider
+                          label="蛋白质" unit="掌" Icon={Beef} color="#22c55e"
+                          value={meal.proteinPalms}
+                          onChange={(v) => setMealSafe({ proteinPalms: v })}
+                          min={0} max={8} step={0.5}
+                        />
+                        <Slider
+                          label="碳水" unit="拳" Icon={Wheat} color="#fde68a"
+                          value={meal.carbCuppedHands}
+                          onChange={(v) => { setCarbTouched(true); setMealSafe({ carbCuppedHands: v }); }}
+                          min={0} max={8} step={0.5}
+                        />
+                        <Slider
+                          label="油脂" unit="指" Icon={Droplet} color="#f97316"
+                          value={meal.fatThumbs}
+                          onChange={(v) => setMealSafe({ fatThumbs: v })}
+                          min={0} max={8} step={0.5}
+                        />
+                        <Slider
+                          label="蔬菜" unit="拳" Icon={Leaf} color="#16a34a"
+                          value={meal.vegFists}
+                          onChange={(v) => setMealSafe({ vegFists: v })}
+                          min={0} max={8} step={0.5}
+                        />
+                      </div>
+                      <div className="estBox">
+                        <div className="estLine">
+                          <span>实时估算</span>
+                          <span>{est.kcal} kcal ｜ P {est.protein_g}g / C {est.carbs_g}g / F {est.fat_g}g</span>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="action-grid">
+                    <button
+                      type="button"
+                      className="action-button action-button--primary"
+                      onClick={genPlan}
+                    >
+                      <Sparkles size={18} className="mr-1" /> 保存记录
+                    </button>
+                    <button type="button" className="action-button" onClick={resetAll}>
+                      重置
+                    </button>
+                  </div>
+                  <div className="muted">
+                    <button type="button" className="link-button" onClick={() => goToInput("photo")}>
+                      切换到拍照记录
+                    </button>
+                  </div>
+                </>
+              )}
 
             </section>
           )}
@@ -1761,6 +1790,114 @@ function NavButton({ label, Icon, id, activeTab, onSelect }) {
       </div>
       <span className="text-[10px] font-medium">{label}</span>
     </button>
+  );
+}
+
+function PhotoResultCard({ meal, est, goal, showAdjustPanel, setShowAdjustPanel, setMealSafe, setCarbTouched, getMealSignals, genPlan, onRetake }) {
+  const signals = getMealSignals(meal, meal.mealTime, goal);
+  const signalIcon = (s) => s === "ok" ? "✓" : s === "high" ? "⚠️" : "↓";
+  const shortDesc = (meal.desc || "").slice(0, 30);
+
+  return (
+    <div style={{ border: "1.5px solid #e5e7eb", borderRadius: "16px", padding: "20px", marginTop: "8px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+        <span style={{ fontWeight: 600, fontSize: "15px" }}>{meal.mealTime}</span>
+        <span style={{ fontSize: "13px", color: "#6b7280" }}>AI 识别完成</span>
+      </div>
+
+      <div style={{ textAlign: "center", fontSize: "28px", fontWeight: 700, margin: "16px 0 8px" }}>
+        🍱 约 {est.kcal} kcal
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "center", gap: "16px", fontSize: "14px", marginBottom: "16px" }}>
+        <span>蛋白质 {signalIcon(signals.protein)}</span>
+        <span>碳水 {signalIcon(signals.carb)}</span>
+        <span>脂肪 {signalIcon(signals.fat)}</span>
+        <span>蔬菜 {signalIcon(signals.veg)}</span>
+      </div>
+
+      {shortDesc ? (
+        <div style={{ fontSize: "13px", color: "#6b7280", fontStyle: "italic", textAlign: "center", marginBottom: "16px" }}>
+          「{shortDesc}」
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        className="link-button"
+        style={{ display: "block", marginBottom: "8px" }}
+        onClick={() => setShowAdjustPanel((v) => !v)}
+      >
+        微调份量 {showAdjustPanel ? "∧" : "∨"}
+      </button>
+
+      {showAdjustPanel && (
+        <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: "12px", marginBottom: "12px" }}>
+          <Stepper
+            label="蛋白质" unit="掌" icon="🥩"
+            value={meal.proteinPalms}
+            onChange={(v) => setMealSafe({ proteinPalms: v })}
+          />
+          <Stepper
+            label="碳水" unit="拳" icon="🍚"
+            value={meal.carbCuppedHands}
+            onChange={(v) => { setCarbTouched(true); setMealSafe({ carbCuppedHands: v }); }}
+          />
+          <Stepper
+            label="油脂" unit="指" icon="🫒"
+            value={meal.fatThumbs}
+            onChange={(v) => setMealSafe({ fatThumbs: v })}
+          />
+          <Stepper
+            label="蔬菜" unit="拳" icon="🥦"
+            value={meal.vegFists}
+            onChange={(v) => setMealSafe({ vegFists: v })}
+          />
+        </div>
+      )}
+
+      <button
+        type="button"
+        className="action-button action-button--primary"
+        style={{ width: "100%" }}
+        onClick={genPlan}
+      >
+        <Check size={18} className="mr-1" /> 保存记录
+      </button>
+
+      <div style={{ textAlign: "center", marginTop: "12px" }}>
+        <button type="button" className="link-button" onClick={onRetake}>
+          重新拍照
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Stepper({ label, unit, icon, value, onChange, min = 0, max = 8, step = 0.5 }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #f3f4f6" }}>
+      <span style={{ fontSize: "14px" }}>{icon} {label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(min, Math.round((value - step) * 10) / 10))}
+          style={{ width: "32px", height: "32px", borderRadius: "50%", border: "1.5px solid #d1d5db", background: "#f9fafb", fontSize: "18px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+        >
+          −
+        </button>
+        <span style={{ width: "56px", textAlign: "center", fontSize: "14px", fontWeight: 500 }}>
+          {value} {unit}
+        </span>
+        <button
+          type="button"
+          onClick={() => onChange(Math.min(max, Math.round((value + step) * 10) / 10))}
+          style={{ width: "32px", height: "32px", borderRadius: "50%", border: "1.5px solid #d1d5db", background: "#f9fafb", fontSize: "18px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+        >
+          +
+        </button>
+      </div>
+    </div>
   );
 }
 
