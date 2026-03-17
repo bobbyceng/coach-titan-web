@@ -283,6 +283,7 @@ export default function App() {
   const [carbTouched, setCarbTouched] = useState(false);
   const [meal, _setMeal] = useState({
     desc: "",
+    comment: "",
     proteinPalms: 1,
     carbCuppedHands: 1,
     fatThumbs: 1,
@@ -594,7 +595,7 @@ export default function App() {
 
   async function analyzeWithTwoPhotos({ frontBase64, sideBase64 }) {
     const topPrompt =
-      "这是俯拍图，旁边可能有参照物（如手掌、餐具或手机）。请识别食物并按拳掌法估算，返回JSON：{\"desc\":\"餐食名称\",\"proteinPalms\":1,\"carbCuppedHands\":1,\"fatThumbs\":1,\"vegFists\":1}。只返回JSON。";
+      "这是俯拍图，旁边可能有参照物（如手掌、餐具或手机）。请识别食物并按拳掌法估算，返回JSON：{\"desc\":\"餐食名称\",\"proteinPalms\":1,\"carbCuppedHands\":1,\"fatThumbs\":1,\"vegFists\":1,\"comment\":\"一句话评价这餐的营养均衡性，不超过20字\"}。只返回JSON。";
     const topData = frontBase64
       ? await analyzeWithVision({ prompt: topPrompt, imageBase64: frontBase64 })
       : await analyzeWithVision({ prompt: topPrompt, imageBase64: sideBase64 });
@@ -605,7 +606,7 @@ export default function App() {
 
     const basePayload = topResult ? JSON.stringify(topResult) : "{}";
     const sidePrompt =
-      `这是侧面图，旁边可能有参照物（如手掌、餐具或手机）。上一张俯拍估算为：${basePayload}。请结合侧面图修正份量，返回JSON：{"desc":"餐食名称","proteinPalms":1,"carbCuppedHands":1,"fatThumbs":1,"vegFists":1}。只返回JSON。`;
+      `这是侧面图，旁边可能有参照物（如手掌、餐具或手机）。上一张俯拍估算为：${basePayload}。请结合侧面图修正份量，返回JSON：{"desc":"餐食名称","proteinPalms":1,"carbCuppedHands":1,"fatThumbs":1,"vegFists":1,"comment":"一句话评价这餐的营养均衡性，不超过20字"}。只返回JSON。`;
     const sideData = await analyzeWithVision({ prompt: sidePrompt, imageBase64: sideBase64 });
     const sideText = extractResponseText(sideData);
     const sideResult = parseVisionResult(sideText);
@@ -657,6 +658,7 @@ export default function App() {
       if (result) {
         setMealSafe({
           desc: result.desc || meal.desc,
+          comment: result.comment || "",
           proteinPalms: Number(result.proteinPalms) || meal.proteinPalms,
           carbCuppedHands: Number(result.carbCuppedHands) || meal.carbCuppedHands,
           fatThumbs: Number(result.fatThumbs) || meal.fatThumbs,
@@ -1796,7 +1798,7 @@ function NavButton({ label, Icon, id, activeTab, onSelect }) {
 function PhotoResultCard({ meal, est, goal, showAdjustPanel, setShowAdjustPanel, setMealSafe, setCarbTouched, getMealSignals, genPlan, onRetake }) {
   const signals = getMealSignals(meal, meal.mealTime, goal);
   const signalIcon = (s) => s === "ok" ? "✓" : s === "high" ? "⚠️" : "↓";
-  const shortDesc = (meal.desc || "").slice(0, 30);
+  const aiComment = (meal.comment || "").slice(0, 30);
 
   return (
     <div style={{ border: "1.5px solid #e5e7eb", borderRadius: "16px", padding: "20px", marginTop: "8px" }}>
@@ -1816,9 +1818,9 @@ function PhotoResultCard({ meal, est, goal, showAdjustPanel, setShowAdjustPanel,
         <span>蔬菜 {signalIcon(signals.veg)}</span>
       </div>
 
-      {shortDesc ? (
+      {aiComment ? (
         <div style={{ fontSize: "13px", color: "#6b7280", fontStyle: "italic", textAlign: "center", marginBottom: "16px" }}>
-          「{shortDesc}」
+          「{aiComment}」
         </div>
       ) : null}
 
