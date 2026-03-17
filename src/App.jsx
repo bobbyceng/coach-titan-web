@@ -1661,16 +1661,15 @@ export default function App() {
                       <b>结果摘要</b>
                       <p>{result.summary}</p>
                     </div>
+                    {meal.desc?.trim() ? (
+                      <div className="bubble">
+                        <b>餐食描述</b>
+                        <p>{result.mealTime || meal.mealTime}「{meal.desc}」</p>
+                      </div>
+                    ) : null}
                     <div className="bubble">
                       <b>下一步建议</b>
                       <p>{result.plan}</p>
-                      {meal.desc?.trim() ? (
-                        <p className="small">餐食描述：{meal.mealTime}「{meal.desc}」</p>
-                      ) : null}
-                    </div>
-                    <div className="bubble">
-                      <b>AI 解释（预留）</b>
-                      <p>后续可接入模型，生成更细化的个性化说明。</p>
                     </div>
                     <div className="bubble warn">
                       <b>安全提示</b>
