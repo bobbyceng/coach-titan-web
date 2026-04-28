@@ -44,7 +44,7 @@ const DEFAULT_PROFILE = {
   hip: "",
   goal: "减脂",
   trainingFreq: "每周 3-4 次",
-  injuries: "无",
+  injuries: "",
   notes: "",
 };
 
@@ -252,17 +252,16 @@ export default function App() {
   const [history, setHistory] = useState(() =>
     normalizeHistory(loadLS("titan_history", []))
   );
-  const [inputMode, setInputMode] = useState("auto");
   const [isEditMode, setIsEditMode] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
   const [showToast, setShowToast] = useState(false);
+  const [expandedHistoryId, setExpandedHistoryId] = useState(null);
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [aiError, setAiError] = useState("");
   const [photoEstimateStatus, setPhotoEstimateStatus] = useState("idle");
   const [showPhotoResult, setShowPhotoResult] = useState(false);
   const [showAdjustPanel, setShowAdjustPanel] = useState(false);
   const [coachAdvice, setCoachAdvice] = useState("");
-  const [result, setResult] = useState(null);
 
   const [photoFront, setPhotoFront] = useState({ name: "", url: "", base64: "" });
   const [photoSide, setPhotoSide] = useState({ name: "", url: "", base64: "" });
@@ -299,12 +298,6 @@ export default function App() {
   const [isTrainingToday, setIsTrainingToday] = useState(() =>
     loadLS("titan_is_training_today", true)
   );
-
-  const isSafetyGatePassed = useMemo(() => {
-    const injuries = (profile.injuries || "").trim();
-    const normalized = injuries.replace(/\s+/g, "");
-    return normalized.length > 0;
-  }, [profile.injuries]);
 
   const displayName = useMemo(() => {
     const name = (profile.name || "").trim();
@@ -366,7 +359,6 @@ export default function App() {
   }, [photoSide.url]);
 
   const est = useMemo(() => estimateMealByHand(meal), [meal]);
-  const showTuningPanel = inputMode === "manual";
 
   const todayKey = getDateKey(new Date());
   const todayMeals = useMemo(
@@ -393,6 +385,26 @@ export default function App() {
       }
     );
   }, [todayMeals]);
+
+  const todayStatus = useMemo(() => {
+    if (todayTotals.mealCount === 0) return "";
+    const daily = estimateDailyCalories(profile);
+    if (!daily) {
+      return todayTotals.veg / Math.max(todayTotals.mealCount, 1) < 1
+        ? "蔬菜偏少，下一餐补一拳。"
+        : "节奏稳定，继续保持。";
+    }
+    const ratio = todayTotals.kcal / daily.target;
+    if (ratio >= 1.05) return `今日已超目标（约 ${daily.target} kcal）。下一餐建议轻量，多走一会儿。`;
+    if (ratio >= 0.85) return `接近日目标（约 ${daily.target} kcal），节奏稳定。`;
+    if (todayTotals.mealCount >= 2 && todayTotals.protein < todayTotals.mealCount * 0.8) {
+      return "蛋白偏少，下一餐补 1 掌肉/蛋/豆制品。";
+    }
+    if (todayTotals.mealCount >= 2 && todayTotals.veg / todayTotals.mealCount < 1) {
+      return "蔬菜偏少，下一餐补一拳。";
+    }
+    return `已记 ${Math.round(todayTotals.kcal)} kcal，距日目标还有 ${Math.max(0, daily.target - Math.round(todayTotals.kcal))} kcal。`;
+  }, [todayTotals, profile]);
 
   const weekMeals = useMemo(() => {
     const cutoff = new Date();
@@ -430,6 +442,21 @@ export default function App() {
       hint,
     };
   }, [weekMeals]);
+
+  const groupedHistory = useMemo(() => {
+    const groups = [];
+    let currentKey = null;
+    history.forEach((item) => {
+      const dk = item.dateKey || "未知日期";
+      if (dk !== currentKey) {
+        groups.push({ dateKey: dk, items: [item] });
+        currentKey = dk;
+      } else {
+        groups[groups.length - 1].items.push(item);
+      }
+    });
+    return groups;
+  }, [history]);
 
   function setMealSafe(patch) {
     _setMeal((prev) => {
@@ -677,36 +704,6 @@ export default function App() {
     }
   }
 
-  async function handleQuickAnalyze() {
-    if (!meal.desc.trim()) return;
-    setAiError("");
-    setIsAiProcessing(true);
-    try {
-      const prompt = `用户描述了一餐：${meal.desc}。按拳掌法估算并返回JSON：{"desc":"餐食名称","proteinPalms":1,"carbCuppedHands":1,"fatThumbs":1,"vegFists":1}。只返回JSON。`;
-      const data = await analyzeWithVision({ prompt });
-      const text = extractResponseText(data);
-      const result = parseVisionResult(text);
-
-      if (result) {
-        setMealSafe({
-          desc: result.desc || meal.desc,
-          proteinPalms: Number(result.proteinPalms) || meal.proteinPalms,
-          carbCuppedHands: Number(result.carbCuppedHands) || meal.carbCuppedHands,
-          fatThumbs: Number(result.fatThumbs) || meal.fatThumbs,
-          vegFists: Number(result.vegFists) || meal.vegFists,
-        });
-      }
-
-      setShowPreview(true);
-    } catch (error) {
-      console.error(error);
-      setAiError(error?.message || "AI 估算失败，请稍后重试");
-      setShowPreview(true);
-    } finally {
-      setIsAiProcessing(false);
-    }
-  }
-
   function handleAvatarChange(event) {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -827,7 +824,6 @@ export default function App() {
       setTone(payload.tone || "pro");
       setIsTrainingToday(Boolean(payload.isTrainingToday));
       setHistory(normalizeHistory(payload.history));
-      setResult(null);
       setShowPreview(false);
       setIsEditMode(false);
       setActiveTab("home");
@@ -911,35 +907,16 @@ export default function App() {
       goal: profile.goal,
     });
 
-    setResult(newResult);
     setHistory((prev) => [newResult, ...prev]);
-    setToastMsg("已存入 Titan 日志");
-    setShowToast(true);
-    setActiveTab("advice");
-  }
-
-  function resetAll() {
-    if (!window.confirm("确定清空本地数据与照片吗？")) return;
-    setProfile(DEFAULT_PROFILE);
-    setHistory([]);
-    setTone("pro");
-    setIsTrainingToday(true);
-    setCarbTouched(false);
-    setInputMode("auto");
-    setMealSafe({
-      desc: "",
-      proteinPalms: 1,
-      carbCuppedHands: 1,
-      fatThumbs: 1,
-      vegFists: 1,
-      mealTime: "午餐",
-    });
+    setShowPhotoResult(false);
+    setShowAdjustPanel(false);
+    setPhotoEstimateStatus("idle");
     setPhotoFront({ name: "", url: "", base64: "" });
     setPhotoSide({ name: "", url: "", base64: "" });
-    setResult(null);
+    setToastMsg("已存入 Titan 日志");
+    setShowToast(true);
     setActiveTab("home");
   }
-
 
   async function handleQuickSave() {
     const desc = quickDesc.trim();
@@ -1038,16 +1015,12 @@ export default function App() {
     }
   }
 
-  function goToInput(mode = "auto") {
-    setInputMode(mode);
+  function goToInput() {
     setShowPreview(false);
     setShowPhotoResult(false);
     setShowAdjustPanel(false);
     setIsEditMode(false);
     setActiveTab("input");
-    if (mode === "manual") {
-      setTimeout(() => descInputRef.current?.focus(), 0);
-    }
   }
 
   function openEditMode() {
@@ -1060,10 +1033,6 @@ export default function App() {
   }
 
   function handleDeepAdvice() {
-    if (!isSafetyGatePassed) {
-      setActiveTab("profile");
-      return;
-    }
     if (history.length === 0) {
       setCoachAdvice("暂无记录，先记录一餐再查看复盘。");
       return;
@@ -1079,16 +1048,12 @@ export default function App() {
 
   return (
     <>
-      <div className="disclaimer-banner">{DISCLAIMER}</div>
       <div className="app">
         <header className="topbar">
           <div>
             <div className="app-title">{APP_TITLE}</div>
             <div className="app-subtitle">科技感 · 轻量饮食估算</div>
           </div>
-          {!isSafetyGatePassed && (
-            <div className="safety-badge">请完善伤病史以解锁深度建议</div>
-          )}
         </header>
         {showToast && (
           <div className="toast">
@@ -1125,7 +1090,7 @@ export default function App() {
                   ))}
                 </div>
                 <div className="input-group">
-                  <button className="camera-inline-btn" onClick={() => goToInput("photo")} title="拍照记录">
+                  <button className="camera-inline-btn" onClick={goToInput} title="拍照记录">
                     <Camera size={20} strokeWidth={1.5} />
                   </button>
                   <input
@@ -1268,6 +1233,36 @@ export default function App() {
                 />
               </div>
 
+              {(() => {
+                const cal = estimateDailyCalories(profile);
+                if (!cal) return null;
+                return (
+                  <div className="home-card" style={{ margin: "16px 0" }}>
+                    <div className="home-title">代谢估算</div>
+                    <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+                      <div className="stat-box">
+                        <label>基础代谢</label>
+                        <div style={{ fontWeight: 700, fontSize: "18px" }}>{cal.bmr}</div>
+                        <div style={{ fontSize: "11px", color: "#6b7280" }}>kcal/天</div>
+                      </div>
+                      <div className="stat-box">
+                        <label>日总消耗</label>
+                        <div style={{ fontWeight: 700, fontSize: "18px" }}>{cal.tdee}</div>
+                        <div style={{ fontSize: "11px", color: "#6b7280" }}>kcal/天</div>
+                      </div>
+                      <div className="stat-box">
+                        <label>每餐参考</label>
+                        <div style={{ fontWeight: 700, fontSize: "18px" }}>{cal.perMeal}</div>
+                        <div style={{ fontSize: "11px", color: "#6b7280" }}>kcal/餐</div>
+                      </div>
+                    </div>
+                    <div className="historyMeta" style={{ marginTop: "8px" }}>
+                      目标：{profile.goal}，日摄入目标约 {cal.target} kcal
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="section-label">设置</div>
               <div className="formRow">
                 <label>目标</label>
@@ -1338,6 +1333,8 @@ export default function App() {
                 style={{ display: "none" }}
               />
               {backupStatus ? <div className="muted">{backupStatus}</div> : null}
+
+              <div className="disclaimer-text">{DISCLAIMER}</div>
             </section>
           )}
 
@@ -1347,11 +1344,11 @@ export default function App() {
                 <button className="icon-btn-back" onClick={() => setActiveTab("home")}>
                   <ChevronLeft size={24} />
                 </button>
-                <h2>{inputMode === "photo" ? "拍照记录" : "快速输入"}</h2>
+                <h2>拍照记录</h2>
               </div>
 
               {/* ── 拍照模式：阶段一（上传表单） ── */}
-              {inputMode !== "manual" && !showPhotoResult && (
+              {!showPhotoResult && (
                 <>
                   {/* 餐次 Tabs */}
                   <div className="quick-meal-tabs" style={{ marginBottom: "12px" }}>
@@ -1457,7 +1454,7 @@ export default function App() {
               )}
 
               {/* ── 拍照模式：阶段二（结果卡片） ── */}
-              {inputMode !== "manual" && showPhotoResult && (
+              {showPhotoResult && (
                 <PhotoResultCard
                   meal={meal}
                   est={est}
@@ -1474,109 +1471,6 @@ export default function App() {
                     setPhotoEstimateStatus("idle");
                   }}
                 />
-              )}
-
-              {/* ── 手动模式 ── */}
-              {inputMode === "manual" && (
-                <>
-                  <div className="formRow twoCol">
-                    <div>
-                      <label>餐次</label>
-                      <select
-                        value={meal.mealTime}
-                        onChange={(e) => {
-                          const next = e.target.value;
-                          setCarbTouched(false);
-                          setMealSafe({ mealTime: next });
-                          applyDefaultHandMap(next);
-                        }}
-                      >
-                        <option>早餐</option>
-                        <option>午餐</option>
-                        <option>晚餐</option>
-                        <option>加餐</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label>今日训练</label>
-                      <select
-                        value={isTrainingToday ? "yes" : "no"}
-                        onChange={(e) => {
-                          setCarbTouched(false);
-                          setIsTrainingToday(e.target.value === "yes");
-                        }}
-                      >
-                        <option value="yes">是</option>
-                        <option value="no">否</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="formRow">
-                    <label>餐食描述</label>
-                    <input
-                      ref={descInputRef}
-                      value={meal.desc}
-                      onChange={(e) => setMealSafe({ desc: e.target.value })}
-                      placeholder="例如：牛肉饭 + 青菜"
-                    />
-                  </div>
-
-                  {showTuningPanel && (
-                    <>
-                      <div className="sliders">
-                        <Slider
-                          label="蛋白质" unit="掌" Icon={Beef} color="#22c55e"
-                          value={meal.proteinPalms}
-                          onChange={(v) => setMealSafe({ proteinPalms: v })}
-                          min={0} max={8} step={0.5}
-                        />
-                        <Slider
-                          label="碳水" unit="拳" Icon={Wheat} color="#fde68a"
-                          value={meal.carbCuppedHands}
-                          onChange={(v) => { setCarbTouched(true); setMealSafe({ carbCuppedHands: v }); }}
-                          min={0} max={8} step={0.5}
-                        />
-                        <Slider
-                          label="油脂" unit="指" Icon={Droplet} color="#f97316"
-                          value={meal.fatThumbs}
-                          onChange={(v) => setMealSafe({ fatThumbs: v })}
-                          min={0} max={8} step={0.5}
-                        />
-                        <Slider
-                          label="蔬菜" unit="拳" Icon={Leaf} color="#16a34a"
-                          value={meal.vegFists}
-                          onChange={(v) => setMealSafe({ vegFists: v })}
-                          min={0} max={8} step={0.5}
-                        />
-                      </div>
-                      <div className="estBox">
-                        <div className="estLine">
-                          <span>实时估算</span>
-                          <span>{est.kcal} kcal ｜ P {est.protein_g}g / C {est.carbs_g}g / F {est.fat_g}g</span>
-                        </div>
-                      </div>
-                    </>
-                  )}
-
-                  <div className="action-grid">
-                    <button
-                      type="button"
-                      className="action-button action-button--primary"
-                      onClick={genPlan}
-                    >
-                      <Sparkles size={18} className="mr-1" /> 保存记录
-                    </button>
-                    <button type="button" className="action-button" onClick={resetAll}>
-                      重置
-                    </button>
-                  </div>
-                  <div className="muted">
-                    <button type="button" className="link-button" onClick={() => goToInput("photo")}>
-                      切换到拍照记录
-                    </button>
-                  </div>
-                </>
               )}
 
             </section>
@@ -1644,47 +1538,54 @@ export default function App() {
             </section>
           )}
 
-          {activeTab === "advice" && !isEditMode && (
+          {activeTab === "today" && !isEditMode && (
             <section className="card">
-              <div className="header-row-back">
-                <button className="icon-btn-back" onClick={() => setActiveTab("input")}>
-                  <ChevronLeft size={24} />
-                </button>
-                <h2>规划建议</h2>
-              </div>
-              {!result ? (
-                <div className="muted">先在“饮食输入”里生成下一餐建议。</div>
-              ) : (
+              <h2>今天</h2>
+              <div className="muted" style={{ marginBottom: "12px" }}>{todayKey}</div>
+
+              {todayMeals.length === 0 ? (
                 <>
-                  <div className="output">
-                    <div className="bubble">
-                      <b>结果摘要</b>
-                      <p>{result.summary}</p>
-                    </div>
-                    {meal.desc?.trim() ? (
-                      <div className="bubble">
-                        <b>餐食描述</b>
-                        <p>{result.mealTime || meal.mealTime}「{meal.desc}」</p>
-                      </div>
-                    ) : null}
-                    <div className="bubble">
-                      <b>下一步建议</b>
-                      <p>{result.plan}</p>
-                    </div>
-                    <div className="bubble warn">
-                      <b>安全提示</b>
-                      <p>{result.safety}</p>
-                    </div>
-                  </div>
-                  <div className="actions">
+                  <div className="muted">今天还没记录。先记一餐试试。</div>
+                  <div className="actions" style={{ marginTop: "12px" }}>
                     <button
                       type="button"
-                      className="secondary"
-                      onClick={() => setActiveTab("history")}
+                      className="primary"
+                      onClick={() => setActiveTab("home")}
                     >
-                      查看日志
+                      去记录
                     </button>
                   </div>
+                </>
+              ) : (
+                <>
+                  <div className="home-card">
+                    <div className="home-title">今日汇总</div>
+                    <div className="historyMeta">
+                      已记 {todayTotals.mealCount} 餐 · 共 {Math.round(todayTotals.kcal)} kcal
+                    </div>
+                    <div className="historyMeta">
+                      蛋白 {formatAmount(todayTotals.protein)} 掌 · 碳水 {formatAmount(todayTotals.carb)} 拳 · 油脂 {formatAmount(todayTotals.fat)} 指 · 蔬菜 {formatAmount(todayTotals.veg)} 拳
+                    </div>
+                    <div className="historyMeta" style={{ marginTop: "8px", fontWeight: 600, color: "var(--primary)" }}>
+                      {todayStatus}
+                    </div>
+                  </div>
+
+                  <div className="section-label" style={{ marginTop: "16px" }}>今日餐次</div>
+                  <div className="historyList">
+                    {todayMeals.map((item) => (
+                      <div className="historyItem" key={item.id}>
+                        <div className="historyHeader">
+                          <span>{item.mealTime}</span>
+                          <span>{item.timestamp}</span>
+                        </div>
+                        <div className="historyTitle">{item.mealDesc}</div>
+                        <div className="historyMeta">{Math.round(item.kcal)} kcal</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="disclaimer-text">{DISCLAIMER}</div>
                 </>
               )}
             </section>
@@ -1697,11 +1598,6 @@ export default function App() {
                 <button className="secondary" onClick={handleDeepAdvice}>
                   深度复盘
                 </button>
-                {!isSafetyGatePassed && (
-                  <button className="secondary" onClick={() => setActiveTab("profile")}>
-                    完善档案
-                  </button>
-                )}
               </div>
               {history.length > 0 && (
                 weekSummary ? (
@@ -1724,15 +1620,42 @@ export default function App() {
                 <div className="muted">暂无记录。</div>
               ) : (
                 <div className="historyList">
-                    {history.map((item, index) => (
-                      <div className="historyItem" key={item.id || `${item.timestamp}-${index}`}>
-
-                      <div className="historyHeader">
-                        <span>{item.mealTime}</span>
-                        <span>{item.timestamp}</span>
+                  {groupedHistory.map((group) => (
+                    <div key={group.dateKey}>
+                      <div className="section-label" style={{ marginTop: "12px", marginBottom: "4px" }}>
+                        {group.dateKey === todayKey ? `今天 · ${group.dateKey}` : group.dateKey}
                       </div>
-                      <div className="historyTitle">{item.mealDesc}</div>
-                      <div className="historyMeta">{item.summary}</div>
+                      {group.items.map((item, index) => {
+                        const itemKey = item.id || `${item.dateKey}-${index}`;
+                        const isExpanded = expandedHistoryId === itemKey;
+                        return (
+                          <div
+                            className="historyItem"
+                            key={itemKey}
+                            onClick={() => setExpandedHistoryId(isExpanded ? null : itemKey)}
+                            style={{ cursor: "pointer" }}
+                          >
+                            <div className="historyHeader">
+                              <span>{item.mealTime}</span>
+                              <span>{item.timestamp}</span>
+                            </div>
+                            <div className="historyTitle">{item.mealDesc}</div>
+                            <div className="historyMeta">{item.summary}</div>
+                            {isExpanded && item.plan && (
+                              <div className="bubble" style={{ marginTop: "8px", fontSize: "13px" }}>
+                                <b>下一步建议</b>
+                                <p>{item.plan}</p>
+                              </div>
+                            )}
+                            {isExpanded && item.safety && (
+                              <div className="bubble warn" style={{ marginTop: "6px", fontSize: "13px" }}>
+                                <b>安全提示</b>
+                                <p>{item.safety}</p>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
                 </div>
@@ -1754,6 +1677,7 @@ export default function App() {
 
         <nav className="nav-bar">
           <NavButton Icon={Camera} label="记录" id="home" activeTab={activeTab} onSelect={setActiveTab} />
+          <NavButton Icon={Sparkles} label="今天" id="today" activeTab={activeTab} onSelect={setActiveTab} />
           <NavButton Icon={History} label="日志" id="history" activeTab={activeTab} onSelect={setActiveTab} />
           <NavButton Icon={User} label="档案" id="profile" activeTab={activeTab} onSelect={setActiveTab} />
         </nav>
