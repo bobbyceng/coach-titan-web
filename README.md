@@ -1,6 +1,20 @@
-# Coach Titan Web (Capacitor iOS MVP)
+# Coach Titan — AI 饮食教练 MVP
 
-一个可快速部署到 iPhone 的饮食估算 MVP（React + Vite + Capacitor iOS）。
+**拍一张你正在吃的东西，AI 视觉模型估算热量与营养构成，给出饮食建议。**
+
+一个可快速部署到 iPhone 的饮食估算 MVP（React + Vite + Capacitor iOS）。验证的核心假设：饮食记录最大的流失点是手动输入太麻烦——拍照 + 视觉模型估算能不能把记录成本降到一次点击。
+
+## 工作流程
+
+```
+拍照 / 选图
+  → 前端压缩上传至 /api/vision
+  → Vercel Serverless 代理（隐藏 API key，转发到 ARK 视觉模型）
+  → 返回食物识别 + 热量/营养估算
+  → 前端展示结果与建议
+```
+
+**设计要点：** API key 只存在于 Serverless 函数环境变量中，客户端不持有任何密钥；前端通过 `VITE_VISION_API_URL` 解耦后端地址，本地/线上随时切换。
 
 ## 本地开发
 
